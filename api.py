@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+import argparse
+from contextlib import asynccontextmanager
+from io import BytesIO
+import logging
+import os
+import sys
+import tempfile
+import time
+import warnings
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+import soundfile as sf
+import uvicorn
+
+from indextts.infer import IndexTTS
+from tools.utils import eq, loudnorm
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+
+# 设置当前目录和路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+sys.path.append(os.path.join(current_dir, "indextts"))
+
+# FastAPI 相关导入
+
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger("index-tts-api")
+
+# 过滤健康检查和文档页面的日志
+logging.getLogger("uvicorn.access").addFilter(
+    lambda r: "/health" not in r.getMessage() and "/docs" not in r.getMessage()
+)
+
+parser = argparse.ArgumentParser(description="IndexTTS API")
+parser.add_argument("--verbose", action="store_true", default=False, help="Enable verbose mode")
+parser.add_argument("--port", type=int, default=8000, help="Port to run the API on")
+parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to run the API on")
+parser.add_argument("--model_dir", type=str, default="checkpoints", help="Model checkpoints directory")
+cmd_args = parser.parse_args()
+
+# 检查模型目录是否存在
+if not os.path.exists(cmd_args.model_dir):
+    logger.error(f"模型目录 {cmd_args.model_dir} 不存在，请先下载模型。")
+    sys.exit(1)
+
+# 检查必要的模型文件
+for file in [
+    "bigvgan_generator.pth",
+    "bpe.model",
+    "gpt.pth",
+    "config.yaml",
+]:
+    file_path = os.path.join(cmd_args.model_dir, file)
+    if not os.path.exists(file_path):
+        logger.error(f"必要的模型文件 {file_path} 不存在，请先下载。")
+        sys.exit(1)
+
+# 全局模型实例
+tts = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    应用程序生命周期管理
+    """
+    global tts
+    
+    # 创建输出目录
+    os.makedirs("outputs", exist_ok=True)
+    
+    logger.info("正在初始化 IndexTTS 模型...")
+    try:
+        tts = IndexTTS(
+            model_dir=cmd_args.model_dir,
+            cfg_path=os.path.join(cmd_args.model_dir, "config.yaml")
+        )
+        logger.info("IndexTTS 模型初始化完成")
+        yield
+    finally:
+        logger.info("正在关闭 IndexTTS 模型...")
+        tts = None
+
+# 创建 FastAPI 应用
+app = FastAPI(
+    title="IndexTTS API",
+    description="IndexTTS 语音合成 API 服务",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# 添加 CORS 中间件
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/")
+async def root():
+    """API 根路径"""
+    return {"message": "欢迎使用 IndexTTS API 服务"}
+
+@app.get("/health")
+async def health_check():
+    """健康检查端点"""
+    if tts is None:
+        raise HTTPException(status_code=503, detail="模型未初始化")
+    return {"status": "healthy"}
+
+@app.post("/generate")
+async def generate_audio(
+    text: str = Form(...),
+    prompt_speech: UploadFile = File(...),
+    infer_mode: str = Form("普通推理"),
+    max_text_tokens_per_sentence: int = Form(120),
+    sentences_bucket_max_size: int = Form(4),
+    do_sample: bool = Form(True),
+    top_p: float = Form(0.8),
+    top_k: int = Form(30),
+    temperature: float = Form(1.0),
+    length_penalty: float = Form(0.0),
+    num_beams: int = Form(3),
+    repetition_penalty: float = Form(10.0),
+    max_mel_tokens: int = Form(600),
+    postprocess: bool = Form(True)
+):
+    """
+    语音生成 API
+    
+    使用提供的参考音频生成新的语音。
+    
+    参数：
+        text: 要合成的文本
+        prompt_speech: 参考音频文件（必需）
+        infer_mode: 推理模式，"普通推理"或"批次推理"
+        max_text_tokens_per_sentence: 分句最大Token数
+        sentences_bucket_max_size: 分句分桶的最大容量（批次推理生效）
+        do_sample: 是否进行采样
+        top_p: top-p 采样参数
+        top_k: top-k 采样参数
+        temperature: 温度参数
+        length_penalty: 长度惩罚参数
+        num_beams: beam search 的 beam 数量
+        repetition_penalty: 重复惩罚参数
+        max_mel_tokens: 生成 Token 最大数量
+        postprocess: 是否进行后处理（默认：True）
+    
+    返回：
+        二进制 WAV 格式音频数据
+    """
+    if tts is None:
+        raise HTTPException(status_code=503, detail="模型未初始化")
+    
+    try:
+        # 处理参考音频
+        temp_path = None
+        try:
+            # 读取上传的音频文件
+            contents = await prompt_speech.read()
+            
+            # 使用临时文件
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                temp_path = temp_file.name
+                temp_file.write(contents)
+
+            # 准备推理参数
+            kwargs = {
+                "do_sample": bool(do_sample),
+                "top_p": float(top_p),
+                "top_k": int(top_k) if int(top_k) > 0 else None,
+                "temperature": float(temperature),
+                "length_penalty": float(length_penalty),
+                "num_beams": num_beams,
+                "repetition_penalty": float(repetition_penalty),
+                "max_mel_tokens": int(max_mel_tokens),
+            }
+            
+            # 设置输出路径
+            output_path = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
+            
+            # 执行推理
+            logger.info(f"开始生成语音，文本长度: {len(text)}")
+            if infer_mode == "普通推理":
+                wav_path = tts.infer(
+                    temp_path, 
+                    text, 
+                    output_path, 
+                    verbose=cmd_args.verbose,
+                    max_text_tokens_per_sentence=int(max_text_tokens_per_sentence),
+                    **kwargs
+                )
+            else:  # 批次推理
+                wav_path = tts.infer_fast(
+                    temp_path, 
+                    text, 
+                    output_path, 
+                    verbose=cmd_args.verbose,
+                    max_text_tokens_per_sentence=int(max_text_tokens_per_sentence),
+                    sentences_bucket_max_size=sentences_bucket_max_size,
+                    **kwargs
+                )
+            
+            logger.info(f"语音生成完成，保存到: {wav_path}")
+            
+            # 读取生成的音频文件
+            # 指定 dtype='int16' 以保持与保存时相同的数据类型
+            wav, sr = sf.read(wav_path, dtype='float32')
+            
+            # 后处理
+            if postprocess:
+                wav, _ = loudnorm(wav, sr)
+                wav = eq(wav, sr)
+            
+            # 将音频数据转换为 WAV 格式的二进制数据
+            buffer = BytesIO()
+            sf.write(buffer, wav, sr, format='WAV')
+            buffer.seek(0)
+            
+            # 返回二进制音频数据
+            return Response(
+                content=buffer.read(),
+                media_type="audio/wav"
+            )
+        finally:
+            # 确保临时文件被删除
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+    except Exception as e:
+        logger.exception(f"语音生成处理错误: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"语音生成处理错误: {str(e)}")
+
+
+if __name__ == "__main__":
+    logger.info(f"启动 IndexTTS API 服务，端口: {cmd_args.port}，主机: {cmd_args.host}")
+    uvicorn.run(
+        app,
+        host=cmd_args.host,
+        port=cmd_args.port,
+        log_level="info"
+    )

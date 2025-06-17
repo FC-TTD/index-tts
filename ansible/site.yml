@@ -1,0 +1,47 @@
+---
+- name: 部署 Index-TTS API 服务
+  hosts: localhost
+  gather_facts: yes
+  vars:
+    project_name: "index-tts"
+    project_path: "{{ playbook_dir }}/.."
+    compose_file: "{{ project_path }}/docker/docker-stack.yml"
+    dockerfile: "{{ project_path }}/docker/Dockerfile"
+    image_name: "api"
+    image_tag: "latest"
+    # rsync配置
+    rsync_opts:
+      - "--exclude=*/__pycache__"
+      - "--exclude=*/.pytest_cache"
+      - "--exclude=*/.git"
+      - "--include=indextts/"
+      - "--include=tools/"
+      - "--include=docker/"
+      - "--include=api.py"
+      - "--include=requirements.txt"
+      - "--include=docker/Dockerfile"
+      - "--include=docker/docker-*.yml"
+      - "--include=MANIFEST.in"
+      - "--include=setup.py"
+      - "--include=pyproject.toml"
+      - "--include=README.md"
+      - "--include=indextts/**"
+      - "--include=tools/**"
+      - "--exclude=*"
+
+  roles:
+    # 使用Docker CI/CD角色
+    - role: /workspace/z/roles/docker_ci_cd
+      vars:
+        # CI相关变量
+        ci_project_name: "{{ project_name }}"
+        ci_project_path: "{{ project_path }}"
+        ci_dockerfile_path: "{{ dockerfile }}"
+        ci_registry_url: "{{ registry_url }}"
+        ci_image_name: "{{ image_name }}"
+        ci_image_tag: "{{ image_tag }}"
+        ci_compose_file_path: "{{ compose_file }}"
+        ci_build_host: "{{ build_host }}"
+        ci_rsync_opts: "{{ rsync_opts }}"
+        pt_stack_name: "{{ project_name }}"
+      tags: [docker, ci, cd]
