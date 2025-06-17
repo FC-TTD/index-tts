@@ -1,0 +1,11 @@
+---
+all:
+  hosts:
+    localhost:
+      ansible_connection: local
+  children:
+    build_hosts:
+      hosts:
+        ttd-edge:
+          ansible_host: ttd-edge
+          ansible_user: root

@@ -1,0 +1,30 @@
+version: "3.8"
+
+services:
+  api:
+    image: ${REGISTRY_URL:-registry:5000}/index-tts/api:${IMAGE_TAG:-latest}
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - /TTD-Data/index-tts/checkpoints:/app/checkpoints
+    networks:
+      - caddy
+    ports:
+      - target: 8000
+        published: 4992
+        protocol: tcp
+        mode: host
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == ttd-edge
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+
+networks:
+  caddy:
+    external: true
+    name: caddy
