@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 
-RUN --mount src=requirements.txt,target=/tmp/requirements.txt \
+RUN --mount=type=bind,source=requirements.txt,target=/tmp/requirements.txt \
     pip install --no-cache-dir -r /tmp/requirements.txt
 
 # 先安装依赖
