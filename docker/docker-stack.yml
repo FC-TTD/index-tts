@@ -5,6 +5,8 @@ services:
     image: ${REGISTRY_URL:-registry:5000}/index-tts/api:${IMAGE_TAG:-latest}
     environment:
       - TZ=Asia/Shanghai
+      - NVIDIA_VISIBLE_DEVICES=0  # 使用第0块GPU (RTX 3090)
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     volumes:
       - /TTD-Data/index-tts/checkpoints:/app/checkpoints
     networks:

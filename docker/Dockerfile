@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM nvidia/cuda:12.0.1-cudnn8-runtime-ubuntu22.04
 
 WORKDIR /app
 
@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsndfile1 \
     ffmpeg \
     curl \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -33,4 +34,4 @@ ENV MODEL_DIR=/checkpoints
 EXPOSE 8000
 
 # 启动命令
-CMD ["python", "api.py", "--model_dir", "/app/checkpoints", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python3", "api.py", "--model_dir", "/app/checkpoints", "--host", "0.0.0.0", "--port", "8000"]
