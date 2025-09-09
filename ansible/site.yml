@@ -22,6 +22,9 @@
       - "--include=docker/Dockerfile"
       - "--include=indextts/**"
       - "--include=tools/**"
+      - "--include=checkpoints/**"
+      - "--include=uv.lock"
+      - "--include=pyproject.toml"
       - "--exclude=*"
 
   roles:

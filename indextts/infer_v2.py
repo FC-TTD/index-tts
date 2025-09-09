@@ -69,7 +69,9 @@ class IndexTTS2:
         self.dtype = torch.float16 if self.is_fp16 else None
         self.stop_mel_token = self.cfg.gpt.stop_mel_token
 
-        self.qwen_emo = QwenEmotion(os.path.join(self.model_dir, self.cfg.qwen_emo_path))
+        # Lazy-load QwenEmotion to reduce default memory footprint; only used when use_emo_text=True
+        self.qwen_emo = None
+        self.qwen_emo_path = os.path.join(self.model_dir, self.cfg.qwen_emo_path)
 
         self.gpt = UnifiedVoice(**self.cfg.gpt)
         self.gpt_path = os.path.join(self.model_dir, self.cfg.gpt_checkpoint)
@@ -310,9 +312,19 @@ class IndexTTS2:
             # assert emo_alpha == 1.0
             if emo_text is None:
                 emo_text = text
-            emo_dict, content = self.qwen_emo.inference(emo_text)
+            if self.qwen_emo is None:
+                try:
+                    self.qwen_emo = QwenEmotion(self.qwen_emo_path)
+                except Exception as e:
+                    warnings.warn(f"QwenEmotion 加载失败，将回退为无需文本情感推理: {e}")
+                    self.qwen_emo = None
+            if self.qwen_emo is not None:
+                emo_dict, content = self.qwen_emo.inference(emo_text)
+            else:
+                emo_dict = None
             print(emo_dict)
-            emo_vector = list(emo_dict.values())
+            if emo_dict is not None:
+                emo_vector = list(emo_dict.values())
 
         if emo_vector is not None:
             emo_audio_prompt = None
