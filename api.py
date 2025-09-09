@@ -3,6 +3,7 @@ import argparse
 from contextlib import asynccontextmanager
 from io import BytesIO
 import logging
+import json
 import os
 import sys
 import tempfile
@@ -15,7 +16,7 @@ from fastapi.responses import Response
 import soundfile as sf
 import uvicorn
 
-from indextts.infer import IndexTTS
+from indextts.infer_v2 import IndexTTS2
 from tools.utils import eq, loudnorm
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -26,7 +27,7 @@ sys.path.append(current_dir)
 sys.path.append(os.path.join(current_dir, "indextts"))
 
 # FastAPI 相关导入
-
+device = f"cuda:{int(os.getenv('TASK_SLOT'))-1}" if os.getenv("TASK_SLOT") else None
 
 # 配置日志
 logging.basicConfig(
@@ -45,24 +46,14 @@ parser.add_argument("--verbose", action="store_true", default=False, help="Enabl
 parser.add_argument("--port", type=int, default=8000, help="Port to run the API on")
 parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to run the API on")
 parser.add_argument("--model_dir", type=str, default="checkpoints", help="Model checkpoints directory")
+parser.add_argument("--fp16", action="store_true", default=False, help="Use FP16 to reduce memory and speed up on CUDA")
+parser.add_argument("--use_cuda_kernel", action="store_true", default=False, help="Use BigVGAN custom CUDA kernel (CUDA only)")
 cmd_args = parser.parse_args()
 
 # 检查模型目录是否存在
 if not os.path.exists(cmd_args.model_dir):
     logger.error(f"模型目录 {cmd_args.model_dir} 不存在，请先下载模型。")
     sys.exit(1)
-
-# 检查必要的模型文件
-for file in [
-    "bigvgan_generator.pth",
-    "bpe.model",
-    "gpt.pth",
-    "config.yaml",
-]:
-    file_path = os.path.join(cmd_args.model_dir, file)
-    if not os.path.exists(file_path):
-        logger.error(f"必要的模型文件 {file_path} 不存在，请先下载。")
-        sys.exit(1)
 
 # 全局模型实例
 tts = None
@@ -77,23 +68,31 @@ async def lifespan(app: FastAPI):
     # 创建输出目录
     os.makedirs("outputs", exist_ok=True)
     
-    logger.info("正在初始化 IndexTTS 模型...")
+    logger.info(
+        "正在初始化 IndexTTS2 模型... (device=%s, fp16=%s, use_cuda_kernel=%s)",
+        device,
+        cmd_args.fp16,
+        cmd_args.use_cuda_kernel,
+    )
     try:
-        tts = IndexTTS(
+        tts = IndexTTS2(
+            cfg_path=os.path.join(cmd_args.model_dir, "config.yaml"),
             model_dir=cmd_args.model_dir,
-            cfg_path=os.path.join(cmd_args.model_dir, "config.yaml")
+            is_fp16=bool(cmd_args.fp16),
+            use_cuda_kernel=bool(cmd_args.use_cuda_kernel),
+            device=device,
         )
-        logger.info("IndexTTS 模型初始化完成")
+        logger.info("IndexTTS2 模型初始化完成")
         yield
     finally:
-        logger.info("正在关闭 IndexTTS 模型...")
+        logger.info("正在关闭 IndexTTS2 模型...")
         tts = None
 
 # 创建 FastAPI 应用
 app = FastAPI(
     title="IndexTTS API",
-    description="IndexTTS 语音合成 API 服务",
-    version="1.0.0",
+    description="IndexTTS2 语音合成 API 服务",
+    version="2.0.0",
     lifespan=lifespan
 )
 
@@ -122,40 +121,45 @@ async def health_check():
 async def generate_audio(
     text: str = Form(...),
     prompt_speech: UploadFile = File(...),
-    infer_mode: str = Form("普通推理"),
+    # v2 生成控制参数
+    emo_audio_prompt: UploadFile | None = File(None),
+    emo_alpha: float = Form(1.0),
+    emo_vector: str | None = Form(None),  # JSON 数组字符串，如 "[0,0,0,0,0,0,0.45,0]"
+    use_emo_text: bool = Form(False),
+    emo_text: str | None = Form(None),
+    use_random: bool = Form(False),
+    interval_silence: int = Form(200),
+    # 文本/采样参数（与 v1 基本一致，v2 也支持）
     max_text_tokens_per_sentence: int = Form(120),
-    sentences_bucket_max_size: int = Form(4),
     do_sample: bool = Form(True),
     top_p: float = Form(0.8),
     top_k: int = Form(30),
-    temperature: float = Form(1.0),
+    temperature: float = Form(0.8),
     length_penalty: float = Form(0.0),
     num_beams: int = Form(3),
     repetition_penalty: float = Form(10.0),
-    max_mel_tokens: int = Form(600),
-    postprocess: bool = Form(True)
+    max_mel_tokens: int = Form(1500),
+    postprocess: bool = Form(True),
 ):
     """
-    语音生成 API
-    
-    使用提供的参考音频生成新的语音。
-    
+    语音生成 API（v2）
+
+    使用提供的说话人参考音频生成新的语音，可选使用情感参考音频、情感向量或文本情感描述进行控制。
+
     参数：
         text: 要合成的文本
-        prompt_speech: 参考音频文件（必需）
-        infer_mode: 推理模式，"普通推理"或"批次推理"
-        max_text_tokens_per_sentence: 分句最大Token数
-        sentences_bucket_max_size: 分句分桶的最大容量（批次推理生效）
-        do_sample: 是否进行采样
-        top_p: top-p 采样参数
-        top_k: top-k 采样参数
-        temperature: 温度参数
-        length_penalty: 长度惩罚参数
-        num_beams: beam search 的 beam 数量
-        repetition_penalty: 重复惩罚参数
-        max_mel_tokens: 生成 Token 最大数量
-        postprocess: 是否进行后处理（默认：True）
-    
+        prompt_speech: 说话人参考音频（必需）
+        emo_audio_prompt: 情感参考音频（可选）
+        emo_alpha: 情感混合权重（默认 1.0）
+        emo_vector: 情感向量 JSON 字符串（长度为8的数组，可选）
+        use_emo_text: 是否使用文本描述提取情感（默认 False）
+        emo_text: 文本情感描述（可选；use_emo_text=True 时有效）
+        use_random: 情感向量随机化（默认 False）
+        interval_silence: 句间静音时长（毫秒，默认 200）
+        max_text_tokens_per_sentence: 分句的最大 token 数（默认 120）
+        do_sample/top_p/top_k/temperature/length_penalty/num_beams/repetition_penalty/max_mel_tokens: 采样与长度控制参数
+        postprocess: 是否进行响度归一化和EQ后处理（默认 True）
+
     返回：
         二进制 WAV 格式音频数据
     """
@@ -165,14 +169,31 @@ async def generate_audio(
     try:
         # 处理参考音频
         temp_path = None
+        emo_temp_path = None
         try:
             # 读取上传的音频文件
             contents = await prompt_speech.read()
-            
+
             # 使用临时文件
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
                 temp_path = temp_file.name
                 temp_file.write(contents)
+
+            if emo_audio_prompt is not None:
+                emo_contents = await emo_audio_prompt.read()
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as emo_file:
+                    emo_temp_path = emo_file.name
+                    emo_file.write(emo_contents)
+
+            # 解析 emo_vector（如果提供）
+            emo_vector_list = None
+            if emo_vector:
+                try:
+                    parsed = json.loads(emo_vector)
+                    if isinstance(parsed, list) and all(isinstance(x, (int, float)) for x in parsed):
+                        emo_vector_list = [float(x) for x in parsed]
+                except Exception:
+                    logger.warning("emo_vector 解析失败，已忽略")
 
             # 准备推理参数
             kwargs = {
@@ -185,48 +206,43 @@ async def generate_audio(
                 "repetition_penalty": float(repetition_penalty),
                 "max_mel_tokens": int(max_mel_tokens),
             }
-            
+
             # 设置输出路径
             output_path = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
-            
-            # 执行推理
-            logger.info(f"开始生成语音，文本长度: {len(text)}")
-            if infer_mode == "普通推理":
-                wav_path = tts.infer(
-                    temp_path, 
-                    text, 
-                    output_path, 
-                    verbose=cmd_args.verbose,
-                    max_text_tokens_per_sentence=int(max_text_tokens_per_sentence),
-                    **kwargs
-                )
-            else:  # 批次推理
-                wav_path = tts.infer_fast(
-                    temp_path, 
-                    text, 
-                    output_path, 
-                    verbose=cmd_args.verbose,
-                    max_text_tokens_per_sentence=int(max_text_tokens_per_sentence),
-                    sentences_bucket_max_size=sentences_bucket_max_size,
-                    **kwargs
-                )
-            
+
+            # 执行推理（v2）
+            logger.info(f"开始生成语音（v2），文本长度: {len(text)}")
+            wav_path = tts.infer(
+                spk_audio_prompt=temp_path,
+                text=text,
+                output_path=output_path,
+                emo_audio_prompt=emo_temp_path,
+                emo_alpha=float(emo_alpha),
+                emo_vector=emo_vector_list,
+                use_emo_text=bool(use_emo_text),
+                emo_text=emo_text,
+                use_random=bool(use_random),
+                interval_silence=int(interval_silence),
+                verbose=cmd_args.verbose,
+                max_text_tokens_per_sentence=int(max_text_tokens_per_sentence),
+                **kwargs,
+            )
+
             logger.info(f"语音生成完成，保存到: {wav_path}")
-            
+
             # 读取生成的音频文件
-            # 指定 dtype='int16' 以保持与保存时相同的数据类型
             wav, sr = sf.read(wav_path, dtype='float32')
-            
+
             # 后处理
             if postprocess:
                 wav, _ = loudnorm(wav, sr)
                 wav = eq(wav, sr)
-            
+
             # 将音频数据转换为 WAV 格式的二进制数据
             buffer = BytesIO()
             sf.write(buffer, wav, sr, format='WAV')
             buffer.seek(0)
-            
+
             # 返回二进制音频数据
             return Response(
                 content=buffer.read(),
@@ -236,6 +252,8 @@ async def generate_audio(
             # 确保临时文件被删除
             if temp_path and os.path.exists(temp_path):
                 os.remove(temp_path)
+            if emo_temp_path and os.path.exists(emo_temp_path):
+                os.remove(emo_temp_path)
     except Exception as e:
         logger.exception(f"语音生成处理错误: {str(e)}")
         raise HTTPException(status_code=500, detail=f"语音生成处理错误: {str(e)}")

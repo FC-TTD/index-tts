@@ -86,7 +86,9 @@ class IndexTTS2:
         self.use_accel = use_accel
         self.use_torch_compile = use_torch_compile
 
-        self.qwen_emo = QwenEmotion(os.path.join(self.model_dir, self.cfg.qwen_emo_path))
+        # Lazy-load QwenEmotion to reduce default memory footprint; only used when use_emo_text=True
+        self.qwen_emo = None
+        self.qwen_emo_path = os.path.join(self.model_dir, self.cfg.qwen_emo_path)
 
         self.gpt = UnifiedVoice(**self.cfg.gpt, use_accel=self.use_accel)
         self.gpt_path = os.path.join(self.model_dir, self.cfg.gpt_checkpoint)
@@ -410,10 +412,19 @@ class IndexTTS2:
             # automatically generate emotion vectors from text prompt
             if emo_text is None:
                 emo_text = text  # use main text prompt
-            emo_dict = self.qwen_emo.inference(emo_text)
-            print(f"detected emotion vectors from text: {emo_dict}")
-            # convert ordered dict to list of vectors; the order is VERY important!
-            emo_vector = list(emo_dict.values())
+            if self.qwen_emo is None:
+                try:
+                    self.qwen_emo = QwenEmotion(self.qwen_emo_path)
+                except Exception as e:
+                    warnings.warn(f"QwenEmotion 加载失败，将回退为无需文本情感推理: {e}")
+                    self.qwen_emo = None
+            if self.qwen_emo is not None:
+                emo_dict = self.qwen_emo.inference(emo_text)
+            else:
+                emo_dict = None
+            if emo_dict is not None:
+                print(f"detected emotion vectors from text: {emo_dict}")
+                emo_vector = list(emo_dict.values())
 
         if emo_vector is not None:
             # we have emotion vectors; they can't be blended via alpha mixing
