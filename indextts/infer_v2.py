@@ -2,6 +2,8 @@ import os
 from subprocess import CalledProcessError
 
 os.environ['HF_HUB_CACHE'] = './checkpoints/hf_cache'
+import json
+import re
 import time
 import librosa
 import torch
@@ -35,38 +37,43 @@ import torch.nn.functional as F
 
 class IndexTTS2:
     def __init__(
-            self, cfg_path="checkpoints/config.yaml", model_dir="checkpoints", is_fp16=False, device=None,
-            use_cuda_kernel=None,
+            self, cfg_path="checkpoints/config.yaml", model_dir="checkpoints", use_fp16=False, device=None,
+            use_cuda_kernel=None,use_deepspeed=False
     ):
         """
         Args:
             cfg_path (str): path to the config file.
             model_dir (str): path to the model directory.
-            is_fp16 (bool): whether to use fp16.
+            use_fp16 (bool): whether to use fp16.
             device (str): device to use (e.g., 'cuda:0', 'cpu'). If None, it will be set automatically based on the availability of CUDA or MPS.
             use_cuda_kernel (None | bool): whether to use BigVGan custom fused activation CUDA kernel, only for CUDA device.
+            use_deepspeed (bool): whether to use deepspeed or not.
         """
         if device is not None:
             self.device = device
-            self.is_fp16 = False if device == "cpu" else is_fp16
+            self.use_fp16 = False if device == "cpu" else use_fp16
             self.use_cuda_kernel = use_cuda_kernel is not None and use_cuda_kernel and device.startswith("cuda")
         elif torch.cuda.is_available():
             self.device = "cuda:0"
-            self.is_fp16 = is_fp16
+            self.use_fp16 = use_fp16
             self.use_cuda_kernel = use_cuda_kernel is None or use_cuda_kernel
+        elif hasattr(torch, "xpu") and torch.xpu.is_available():
+            self.device = "xpu"
+            self.use_fp16 = use_fp16
+            self.use_cuda_kernel = False
         elif hasattr(torch, "mps") and torch.backends.mps.is_available():
             self.device = "mps"
-            self.is_fp16 = False  # Use float16 on MPS is overhead than float32
+            self.use_fp16 = False  # Use float16 on MPS is overhead than float32
             self.use_cuda_kernel = False
         else:
             self.device = "cpu"
-            self.is_fp16 = False
+            self.use_fp16 = False
             self.use_cuda_kernel = False
             print(">> Be patient, it may take a while to run in CPU mode.")
 
         self.cfg = OmegaConf.load(cfg_path)
         self.model_dir = model_dir
-        self.dtype = torch.float16 if self.is_fp16 else None
+        self.dtype = torch.float16 if self.use_fp16 else None
         self.stop_mel_token = self.cfg.gpt.stop_mel_token
 
         # Lazy-load QwenEmotion to reduce default memory footprint; only used when use_emo_text=True
@@ -77,23 +84,20 @@ class IndexTTS2:
         self.gpt_path = os.path.join(self.model_dir, self.cfg.gpt_checkpoint)
         load_checkpoint(self.gpt, self.gpt_path)
         self.gpt = self.gpt.to(self.device)
-        if self.is_fp16:
+        if self.use_fp16:
             self.gpt.eval().half()
         else:
             self.gpt.eval()
         print(">> GPT weights restored from:", self.gpt_path)
-        if self.is_fp16:
-            try:
-                import deepspeed
 
-                use_deepspeed = True
-            except (ImportError, OSError, CalledProcessError) as e:
-                use_deepspeed = False
+        try:
+            import deepspeed
+        except (ImportError, OSError, CalledProcessError) as e:
+            if use_deepspeed:
                 print(f">> DeepSpeed加载失败，回退到标准推理: {e}")
+            use_deepspeed = False
 
-            self.gpt.post_init_gpt2_config(use_deepspeed=use_deepspeed, kv_cache=True, half=True)
-        else:
-            self.gpt.post_init_gpt2_config(use_deepspeed=True, kv_cache=True, half=False)
+        self.gpt.post_init_gpt2_config(use_deepspeed=use_deepspeed, kv_cache=True, half=self.use_fp16)
 
         if self.use_cuda_kernel:
             # preload the CUDA kernel for BigVGAN
@@ -147,7 +151,7 @@ class IndexTTS2:
         print(">> campplus_model weights restored from:", campplus_ckpt_path)
 
         bigvgan_name = self.cfg.vocoder.name
-        self.bigvgan = bigvgan.BigVGAN.from_pretrained(bigvgan_name, use_cuda_kernel=False)
+        self.bigvgan = bigvgan.BigVGAN.from_pretrained(bigvgan_name, use_cuda_kernel=True if self.use_cuda_kernel else False)
         self.bigvgan = self.bigvgan.to(self.device)
         self.bigvgan.remove_weight_norm()
         self.bigvgan.eval()
@@ -265,7 +269,7 @@ class IndexTTS2:
 
     def insert_interval_silence(self, wavs, sampling_rate=22050, interval_silence=200):
         """
-        Insert silences between sentences.
+        Insert silences between generated segments.
         wavs: List[torch.tensor]
         """
 
@@ -295,7 +299,7 @@ class IndexTTS2:
               emo_audio_prompt=None, emo_alpha=1.0,
               emo_vector=None,
               use_emo_text=False, emo_text=None, use_random=False, interval_silence=200,
-              verbose=False, max_text_tokens_per_sentence=120, **generation_kwargs):
+              verbose=False, max_text_tokens_per_segment=120, **generation_kwargs):
         print(">> start inference...")
         self._set_gr_progress(0, "start inference...")
         if verbose:
@@ -319,11 +323,12 @@ class IndexTTS2:
                     warnings.warn(f"QwenEmotion 加载失败，将回退为无需文本情感推理: {e}")
                     self.qwen_emo = None
             if self.qwen_emo is not None:
-                emo_dict, content = self.qwen_emo.inference(emo_text)
+                emo_dict = self.qwen_emo.inference(emo_text)
             else:
                 emo_dict = None
             print(emo_dict)
             if emo_dict is not None:
+                # convert ordered dict to list of vectors; the order is VERY important!
                 emo_vector = list(emo_dict.values())
 
         if emo_vector is not None:
@@ -406,12 +411,12 @@ class IndexTTS2:
 
         self._set_gr_progress(0.1, "text processing...")
         text_tokens_list = self.tokenizer.tokenize(text)
-        sentences = self.tokenizer.split_sentences(text_tokens_list, max_text_tokens_per_sentence)
+        segments = self.tokenizer.split_segments(text_tokens_list, max_text_tokens_per_segment)
         if verbose:
             print("text_tokens_list:", text_tokens_list)
-            print("sentences count:", len(sentences))
-            print("max_text_tokens_per_sentence:", max_text_tokens_per_sentence)
-            print(*sentences, sep="\n")
+            print("segments count:", len(segments))
+            print("max_text_tokens_per_segment:", max_text_tokens_per_segment)
+            print(*segments, sep="\n")
         do_sample = generation_kwargs.pop("do_sample", True)
         top_p = generation_kwargs.pop("top_p", 0.8)
         top_k = generation_kwargs.pop("top_k", 30)
@@ -430,7 +435,7 @@ class IndexTTS2:
         bigvgan_time = 0
         progress = 0
         has_warned = False
-        for sent in sentences:
+        for sent in segments:
             text_tokens = self.tokenizer.convert_tokens_to_ids(sent)
             text_tokens = torch.tensor(text_tokens, dtype=torch.int32, device=self.device).unsqueeze(0)
             if verbose:
@@ -438,7 +443,7 @@ class IndexTTS2:
                 print(f"text_tokens shape: {text_tokens.shape}, text_tokens type: {text_tokens.dtype}")
                 # debug tokenizer
                 text_token_syms = self.tokenizer.convert_ids_to_tokens(text_tokens[0].tolist())
-                print("text_token_syms is same as sentence tokens", text_token_syms == sent)
+                print("text_token_syms is same as segment tokens", text_token_syms == sent)
 
             m_start_time = time.perf_counter()
             with torch.no_grad():
@@ -479,7 +484,7 @@ class IndexTTS2:
                     warnings.warn(
                         f"WARN: generation stopped due to exceeding `max_mel_tokens` ({max_mel_tokens}). "
                         f"Input text tokens: {text_tokens.shape[1]}. "
-                        f"Consider reducing `max_text_tokens_per_sentence`({max_text_tokens_per_sentence}) or increasing `max_mel_tokens`.",
+                        f"Consider reducing `max_text_tokens_per_segment`({max_text_tokens_per_segment}) or increasing `max_mel_tokens`.",
                         category=RuntimeWarning
                     )
                     has_warned = True
@@ -609,59 +614,52 @@ class QwenEmotion:
             device_map="auto"
         )
         self.prompt = "文本情感分类"
-        self.convert_dict = {
-            "愤怒": "angry",
+        self.cn_key_to_en = {
             "高兴": "happy",
-            "恐惧": "fear",
-            "反感": "hate",
+            "愤怒": "angry",
             "悲伤": "sad",
-            "低落": "low",
-            "惊讶": "surprise",
-            "自然": "neutral",
+            "恐惧": "afraid",
+            "反感": "disgusted",
+            # TODO: the "低落" (melancholic) emotion will always be mapped to
+            # "悲伤" (sad) by QwenEmotion's text analysis. it doesn't know the
+            # difference between those emotions even if user writes exact words.
+            # SEE: `self.melancholic_words` for current workaround.
+            "低落": "melancholic",
+            "惊讶": "surprised",
+            "自然": "calm",
         }
-        self.backup_dict = {"happy": 0, "angry": 0, "sad": 0, "fear": 0, "hate": 0, "low": 0, "surprise": 0,
-                            "neutral": 1.0}
+        self.desired_vector_order = ["高兴", "愤怒", "悲伤", "恐惧", "反感", "低落", "惊讶", "自然"]
+        self.melancholic_words = {
+            # emotion text phrases that will force QwenEmotion's "悲伤" (sad) detection
+            # to become "低落" (melancholic) instead, to fix limitations mentioned above.
+            "低落",
+            "melancholy",
+            "melancholic",
+            "depression",
+            "depressed",
+            "gloomy",
+        }
         self.max_score = 1.2
         self.min_score = 0.0
 
+    def clamp_score(self, value):
+        return max(self.min_score, min(self.max_score, value))
+
     def convert(self, content):
-        content = content.replace("\n", " ")
-        content = content.replace(" ", "")
-        content = content.replace("{", "")
-        content = content.replace("}", "")
-        content = content.replace('"', "")
-        parts = content.strip().split(',')
-        print(parts)
-        parts_dict = {}
-        desired_order = ["高兴", "愤怒", "悲伤", "恐惧", "反感", "低落", "惊讶", "自然"]
-        for part in parts:
-            key_value = part.strip().split(':')
-            if len(key_value) == 2:
-                parts_dict[key_value[0].strip()] = part
-        # 按照期望顺序重新排列
-        ordered_parts = [parts_dict[key] for key in desired_order if key in parts_dict]
-        parts = ordered_parts
-        if len(parts) != len(self.convert_dict):
-            return self.backup_dict
+        # generate emotion vector dictionary:
+        # - insert values in desired order (Python 3.7+ `dict` remembers insertion order)
+        # - convert Chinese keys to English
+        # - clamp all values to the allowed min/max range
+        # - use 0.0 for any values that were missing in `content`
+        emotion_dict = {
+            self.cn_key_to_en[cn_key]: self.clamp_score(content.get(cn_key, 0.0))
+            for cn_key in self.desired_vector_order
+        }
 
-        emotion_dict = {}
-        for part in parts:
-            key_value = part.strip().split(':')
-            if len(key_value) == 2:
-                try:
-                    key = self.convert_dict[key_value[0].strip()]
-                    value = float(key_value[1].strip())
-                    value = max(self.min_score, min(self.max_score, value))
-                    emotion_dict[key] = value
-                except Exception:
-                    continue
-
-        for key in self.backup_dict:
-            if key not in emotion_dict:
-                emotion_dict[key] = 0.0
-
-        if sum(emotion_dict.values()) <= 0:
-            return self.backup_dict
+        # default to a calm/neutral voice if all emotion vectors were empty
+        if all(val <= 0.0 for val in emotion_dict.values()):
+            print(">> no emotions detected; using default calm/neutral voice")
+            emotion_dict["calm"] = 1.0
 
         return emotion_dict
 
@@ -694,9 +692,30 @@ class QwenEmotion:
         except ValueError:
             index = 0
 
-        content = self.tokenizer.decode(output_ids[index:], skip_special_tokens=True).strip("\n")
-        emotion_dict = self.convert(content)
-        return emotion_dict, content
+        content = self.tokenizer.decode(output_ids[index:], skip_special_tokens=True)
+
+        # decode the JSON emotion detections as a dictionary
+        try:
+            content = json.loads(content)
+        except json.decoder.JSONDecodeError:
+            # invalid JSON; fallback to manual string parsing
+            # print(">> parsing QwenEmotion response", content)
+            content = {
+                m.group(1): float(m.group(2))
+                for m in re.finditer(r'([^\s":.,]+?)"?\s*:\s*([\d.]+)', content)
+            }
+            # print(">> dict result", content)
+
+        # workaround for QwenEmotion's inability to distinguish "悲伤" (sad) vs "低落" (melancholic).
+        # if we detect any of the IndexTTS "melancholic" words, we swap those vectors
+        # to encode the "sad" emotion as "melancholic" (instead of sadness).
+        text_input_lower = text_input.lower()
+        if any(word in text_input_lower for word in self.melancholic_words):
+            # print(">> before vec swap", content)
+            content["悲伤"], content["低落"] = content.get("低落", 0.0), content.get("悲伤", 0.0)
+            # print(">>  after vec swap", content)
+
+        return self.convert(content)
 
 
 if __name__ == "__main__":
