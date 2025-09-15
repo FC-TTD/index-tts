@@ -27,7 +27,6 @@ sys.path.append(current_dir)
 sys.path.append(os.path.join(current_dir, "indextts"))
 
 # FastAPI 相关导入
-device = f"cuda:{int(os.getenv('TASK_SLOT'))-1}" if os.getenv("TASK_SLOT") else None
 
 # 配置日志
 logging.basicConfig(
@@ -48,6 +47,8 @@ parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to run the
 parser.add_argument("--model_dir", type=str, default="checkpoints", help="Model checkpoints directory")
 parser.add_argument("--fp16", action="store_true", default=False, help="Use FP16 to reduce memory and speed up on CUDA")
 parser.add_argument("--use_cuda_kernel", action="store_true", default=False, help="Use BigVGAN custom CUDA kernel (CUDA only)")
+parser.add_argument("--device", type=str, default=None, help="Device to run the model on, e.g., 'cuda:0', 'cpu'")
+parser.add_argument("--use_deepspeed", action=argparse.BooleanOptionalAction, default=True, help="Use DeepSpeed if available (default: enabled)")
 cmd_args = parser.parse_args()
 
 # 检查模型目录是否存在
@@ -69,18 +70,20 @@ async def lifespan(app: FastAPI):
     os.makedirs("outputs", exist_ok=True)
     
     logger.info(
-        "正在初始化 IndexTTS2 模型... (device=%s, fp16=%s, use_cuda_kernel=%s)",
-        device,
+        "正在初始化 IndexTTS2 模型... (fp16=%s, use_cuda_kernel=%s, device=%s, use_deepspeed=%s)",
         cmd_args.fp16,
         cmd_args.use_cuda_kernel,
+        cmd_args.device,
+        cmd_args.use_deepspeed,
     )
     try:
         tts = IndexTTS2(
             cfg_path=os.path.join(cmd_args.model_dir, "config.yaml"),
             model_dir=cmd_args.model_dir,
-            is_fp16=bool(cmd_args.fp16),
+            use_fp16=bool(cmd_args.fp16),
+            device=cmd_args.device,
             use_cuda_kernel=bool(cmd_args.use_cuda_kernel),
-            device=device,
+            use_deepspeed=bool(cmd_args.use_deepspeed),
         )
         logger.info("IndexTTS2 模型初始化完成")
         yield
@@ -199,13 +202,14 @@ async def generate_audio(
             kwargs = {
                 "do_sample": bool(do_sample),
                 "top_p": float(top_p),
-                "top_k": int(top_k) if int(top_k) > 0 else None,
                 "temperature": float(temperature),
                 "length_penalty": float(length_penalty),
                 "num_beams": num_beams,
                 "repetition_penalty": float(repetition_penalty),
                 "max_mel_tokens": int(max_mel_tokens),
             }
+            if int(top_k) > 0:
+                kwargs["top_k"] = int(top_k)
 
             # 设置输出路径
             output_path = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
@@ -224,7 +228,7 @@ async def generate_audio(
                 use_random=bool(use_random),
                 interval_silence=int(interval_silence),
                 verbose=cmd_args.verbose,
-                max_text_tokens_per_sentence=int(max_text_tokens_per_sentence),
+                max_text_tokens_per_segment=int(max_text_tokens_per_sentence),
                 **kwargs,
             )
 

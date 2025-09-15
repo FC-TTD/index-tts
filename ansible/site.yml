@@ -1,5 +1,62 @@
 ---
-- name: 部署 Index-TTS API 服务
+- name: 使用 Ansible 进行远程 Docker Compose 部署
+  hosts: build_hosts
+  gather_facts: yes
+  vars:
+    project_name: "index-tts"
+    # 本地项目根目录（playbook_dir 为 ansible/ 目录）
+    local_project_path: "{{ playbook_dir }}/.."
+    # 远端部署目录
+    remote_project_path: "/opt/index-tts"
+    # docker compose 文件（远端路径）
+    compose_file: "{{ remote_project_path }}/docker-compose.yml"
+
+  tags: [docker]
+  tasks:
+    - name: 创建/清空远端部署目录
+      ansible.builtin.file:
+        path: "{{ remote_project_path }}"
+        state: directory
+        mode: "0755"
+        force: true
+
+    - name: 同步项目文件到远端部署目录（rsync）
+      ansible.posix.synchronize:
+        src: "{{ local_project_path }}/"
+        dest: "{{ remote_project_path }}/"
+        delete: yes
+        recursive: yes
+        rsync_opts:
+          - "--exclude=*/__pycache__"
+          - "--exclude=*/.pytest_cache"
+          - "--exclude=*/.git"
+          - "--include=indextts/"
+          - "--include=indextts/**"
+          - "--include=tools/"
+          - "--include=tools/**"
+          - "--include=api.py"
+          - "--include=README.md"
+          - "--include=pyproject.toml"
+          - "--include=uv.lock"
+          - "--exclude=*"
+    
+    - name: 同步 Dockerfile
+      ansible.posix.synchronize:
+        src: "{{ local_project_path }}/docker/Dockerfile"
+        dest: "{{ remote_project_path }}/Dockerfile"
+
+    - name: 同步 docker-compose.yml
+      ansible.posix.synchronize:
+        src: "{{ local_project_path }}/docker/docker-compose.yml"
+        dest: "{{ remote_project_path }}/docker-compose.yml"
+    
+    - name: (up/restart) 启动服务（后台）
+      ansible.builtin.command:
+        argv: ["docker", "compose", "-f", "{{ compose_file }}", "up", "-d", "--build"]
+      args:
+        chdir: "{{ remote_project_path }}"
+
+- name: 部署 Index-TTS API Swarm 服务
   hosts: localhost
   gather_facts: yes
   vars:
@@ -25,7 +82,9 @@
       - "--include=checkpoints/**"
       - "--include=uv.lock"
       - "--include=pyproject.toml"
+      - "--include=README.md"
       - "--exclude=*"
+  tags: [swarm]
 
   roles:
     # 使用Docker CI/CD角色
@@ -42,4 +101,3 @@
         ci_build_host: "{{ build_host }}"
         ci_rsync_opts: "{{ rsync_opts }}"
         pt_stack_name: "{{ project_name }}"
-      tags: [docker, ci, cd]
