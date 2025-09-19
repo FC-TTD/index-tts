@@ -18,6 +18,8 @@ import uvicorn
 
 from indextts.infer_v2 import IndexTTS2
 from tools.utils import eq, loudnorm
+from tools.notify import notifier
+from tools.health_plugin import setup_cuda_health, track_cuda_health
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -35,10 +37,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("index-tts-api")
 
-# 过滤健康检查和文档页面的日志
-logging.getLogger("uvicorn.access").addFilter(
-    lambda r: "/health" not in r.getMessage() and "/docs" not in r.getMessage()
-)
 
 parser = argparse.ArgumentParser(description="IndexTTS API")
 parser.add_argument("--verbose", action="store_true", default=False, help="Enable verbose mode")
@@ -99,6 +97,15 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# 一步式安装 CUDA 健康检查（注册就绪谓词 + 挂载 /health）
+cuda_monitor = setup_cuda_health(
+    app,
+    path="/health",
+    notifier=notifier,
+    ready_predicate=lambda: tts is not None,
+    track_path_prefixes=None,  # 仅通过装饰器或自定义谓词跟踪
+)
+
 # 添加 CORS 中间件
 app.add_middleware(
     CORSMiddleware,
@@ -113,14 +120,9 @@ async def root():
     """API 根路径"""
     return {"message": "欢迎使用 IndexTTS API 服务"}
 
-@app.get("/health")
-async def health_check():
-    """健康检查端点"""
-    if tts is None:
-        raise HTTPException(status_code=503, detail="模型未初始化")
-    return {"status": "healthy"}
 
 @app.post("/generate")
+@track_cuda_health
 async def generate_audio(
     text: str = Form(...),
     prompt_speech: UploadFile = File(...),
@@ -249,6 +251,9 @@ async def generate_audio(
 
             # 返回二进制音频数据
             return Response(
+                headers={
+                    "Content-Disposition": "attachment; filename=generated.wav"
+                },
                 content=buffer.read(),
                 media_type="audio/wav"
             )
@@ -259,9 +264,9 @@ async def generate_audio(
             if emo_temp_path and os.path.exists(emo_temp_path):
                 os.remove(emo_temp_path)
     except Exception as e:
+        # 抛出异常，交由中间件进行 CUDA 分类与记录
         logger.exception(f"语音生成处理错误: {str(e)}")
         raise HTTPException(status_code=500, detail=f"语音生成处理错误: {str(e)}")
-
 
 if __name__ == "__main__":
     logger.info(f"启动 IndexTTS API 服务，端口: {cmd_args.port}，主机: {cmd_args.host}")

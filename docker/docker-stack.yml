@@ -18,6 +18,11 @@ services:
       placement:
         constraints:
           - node.hostname == ttd-edge
+      update_config:
+        parallelism: 0
+        delay: 0s
+        failure_action: pause
+        order: stop-first  # 关键：先停止再启动
       restart_policy:
         condition: on-failure
         max_attempts: 3
@@ -52,6 +57,11 @@ services:
       placement:
         constraints:
           - node.hostname == ttd-edge
+      update_config:
+        parallelism: 0
+        delay: 0s
+        failure_action: pause
+        order: stop-first  # 关键：先停止再启动
       restart_policy:
         condition: on-failure
         max_attempts: 3
