@@ -9,11 +9,11 @@ ANSIBLE_DIR="./ansible"
 # 解析参数
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --docker)
+    --docker | docker)
       DOCKER_MODE=true
       shift
       ;;
-    --swarm)
+    --swarm | swarm)
       SWARM_MODE=true
       shift
       ;;
