@@ -13,17 +13,17 @@ while [[ $# -gt 0 ]]; do
       DOCKER_MODE=true
       shift
       ;;
-    --swarm | swarm)
+    --swarm | swarm | api)
       SWARM_MODE=true
       shift
       ;;
     *)
       echo "Usage: $0 [--pkg] [--docker] [--swarm]"
       echo "Examples:"
-      echo "  $0           # 使用Docker完整CI/CD流程部署"
-      echo "  $0 --pkg      # 仅打包项目"
-      echo "  $0 --docker   # 部署 Docker 镜像"
-      echo "  $0 --swarm    # 部署 Swarm 服务"
+      echo "  $0             # 使用Docker完整CI/CD流程部署"
+      echo "  $0 --pkg       # 仅打包项目"
+      echo "  $0 --docker    # 部署 Docker 镜像"
+      echo "  $0 --swarm|api # 部署 Swarm 服务"
       exit 1
       ;;
   esac

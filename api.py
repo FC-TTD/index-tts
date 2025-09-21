@@ -28,7 +28,7 @@ from indextts.infer_v2 import IndexTTS2
 from tools.utils import eq, loudnorm
 
 try:
-    from fastapi_cuda_health.plugin import setup_cuda_health
+    from fastapi_cuda_health import setup_cuda_health
 except ImportError:
     from packages.fastapi_cuda_health.src.fastapi_cuda_health import setup_cuda_health
 
