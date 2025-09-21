@@ -14,8 +14,8 @@ conda_env*/
 *.py[cod]
 
 # Distribution/Packaging.
-/build/
-/dist/
+build/
+dist/
 *.egg-info/
 .pypirc
 

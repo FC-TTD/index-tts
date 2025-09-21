@@ -10,6 +10,14 @@ import tempfile
 import time
 import warnings
 
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+
+# 设置当前目录和路径（需在依赖导入前完成）
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+sys.path.append(os.path.join(current_dir, "indextts"))
+
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -18,15 +26,11 @@ import uvicorn
 
 from indextts.infer_v2 import IndexTTS2
 from tools.utils import eq, loudnorm
-from tools.notify import notifier
-from tools.health_plugin import setup_cuda_health, track_cuda_health
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=UserWarning)
 
-# 设置当前目录和路径
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(current_dir)
-sys.path.append(os.path.join(current_dir, "indextts"))
+try:
+    from fastapi_cuda_health.plugin import setup_cuda_health
+except ImportError:
+    from packages.fastapi_cuda_health.src.fastapi_cuda_health import setup_cuda_health
 
 # FastAPI 相关导入
 
@@ -101,9 +105,7 @@ app = FastAPI(
 cuda_monitor = setup_cuda_health(
     app,
     path="/health",
-    notifier=notifier,
     ready_predicate=lambda: tts is not None,
-    track_path_prefixes=None,  # 仅通过装饰器或自定义谓词跟踪
 )
 
 # 添加 CORS 中间件
@@ -122,7 +124,6 @@ async def root():
 
 
 @app.post("/generate")
-@track_cuda_health
 async def generate_audio(
     text: str = Form(...),
     prompt_speech: UploadFile = File(...),
@@ -178,7 +179,7 @@ async def generate_audio(
         try:
             # 读取上传的音频文件
             contents = await prompt_speech.read()
-
+    
             # 使用临时文件
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
                 temp_path = temp_file.name
@@ -189,6 +190,8 @@ async def generate_audio(
                 with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as emo_file:
                     emo_temp_path = emo_file.name
                     emo_file.write(emo_contents)
+                # 特殊逻辑：如果 emo_audio_prompt 存在，交换两个文件的路径
+                temp_path, emo_temp_path = emo_temp_path, temp_path
 
             # 解析 emo_vector（如果提供）
             emo_vector_list = None
@@ -251,9 +254,7 @@ async def generate_audio(
 
             # 返回二进制音频数据
             return Response(
-                headers={
-                    "Content-Disposition": "attachment; filename=generated.wav"
-                },
+                headers={"Content-Disposition": "attachment; filename=generated.wav"},
                 content=buffer.read(),
                 media_type="audio/wav"
             )
