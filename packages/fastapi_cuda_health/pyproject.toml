@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.18.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fastapi-cuda-health"
+version = "0.2.0"
+description = "Global CUDA-aware healthcheck plugin for FastAPI/Starlette: tracks consecutive CUDA failures and exposes /health."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [
+  { name = "huanghuan", email = "huanghuan@fc-ttd.net" }
+]
+keywords = ["fastapi", "starlette", "healthcheck", "cuda", "middleware"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Framework :: FastAPI",
+  "Topic :: Internet :: WWW/HTTP",
+  "Topic :: System :: Monitoring",
+  "Topic :: System :: Hardware",
+  "Operating System :: OS Independent",
+  "Environment :: GPU"
+]
+dependencies = [
+  "fastapi>=0.100"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fastapi_cuda_health"]
