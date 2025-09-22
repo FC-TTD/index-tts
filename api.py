@@ -190,8 +190,6 @@ async def generate_audio(
                 with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as emo_file:
                     emo_temp_path = emo_file.name
                     emo_file.write(emo_contents)
-                # 特殊逻辑：如果 emo_audio_prompt 存在，交换两个文件的路径
-                temp_path, emo_temp_path = emo_temp_path, temp_path
 
             # 解析 emo_vector（如果提供）
             emo_vector_list = None
