@@ -29,7 +29,7 @@ services:
       labels:
         caddy: http://index-api
         # 汇总多个独立 Swarm Service 端点
-        caddy.reverse_proxy: index-tts_api-1:8000 index-tts_api-2:8000
+        caddy.reverse_proxy: index-tts_api-1:8000 index-tts_api-2:8000 index-tts_api-3:8000 index-tts_api-4:8000
         # 主动健康检查
         caddy.reverse_proxy.health_uri: /health
         caddy.reverse_proxy.health_interval: 15s
@@ -57,6 +57,56 @@ services:
       placement:
         constraints:
           - node.hostname == ttd-edge
+      update_config:
+        parallelism: 0
+        delay: 0s
+        failure_action: pause
+        order: stop-first  # 关键：先停止再启动
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+
+  api-3:
+    image: ${REGISTRY_URL:-registry:5000}/index-tts/api:${IMAGE_TAG:-latest}
+    environment:
+      - TZ=Asia/Shanghai
+      - NVIDIA_VISIBLE_DEVICES=1
+    volumes:
+      - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
+    networks:
+      - caddy
+    deploy:
+      mode: replicated
+      replicas: 1
+      endpoint_mode: dnsrr
+      placement:
+        constraints:
+          - node.hostname == ttd-worker
+      update_config:
+        parallelism: 0
+        delay: 0s
+        failure_action: pause
+        order: stop-first  # 关键：先停止再启动
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+
+  api-4:
+    image: ${REGISTRY_URL:-registry:5000}/index-tts/api:${IMAGE_TAG:-latest}
+    environment:
+      - TZ=Asia/Shanghai
+      - NVIDIA_VISIBLE_DEVICES=2
+    volumes:
+      - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
+    networks:
+      - caddy
+    deploy:
+      mode: replicated
+      replicas: 1
+      endpoint_mode: dnsrr
+      placement:
+        constraints:
+          - node.hostname == ttd-worker
       update_config:
         parallelism: 0
         delay: 0s
