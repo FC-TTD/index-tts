@@ -25,12 +25,11 @@ import soundfile as sf
 import uvicorn
 
 from indextts.infer_v2 import IndexTTS2
-from tools.utils import eq, loudnorm
-
+# Postprocess and CUDA health utilities
 try:
-    from fastapi_cuda_health import setup_cuda_health
+    from ttd_fastapi_utils import setup_cuda_health, apply_postprocess
 except ImportError:
-    from packages.fastapi_cuda_health.src.fastapi_cuda_health import setup_cuda_health
+    from packages.ttd_fastapi_utils.src.ttd_fastapi_utils import setup_cuda_health, apply_postprocess
 
 # FastAPI 相关导入
 
@@ -240,10 +239,8 @@ async def generate_audio(
             # 读取生成的音频文件
             wav, sr = sf.read(wav_path, dtype='float32')
 
-            # 后处理
             if postprocess:
-                wav, _ = loudnorm(wav, sr)
-                wav = eq(wav, sr)
+                wav = apply_postprocess(wav, sr, enable=True)
 
             # 将音频数据转换为 WAV 格式的二进制数据
             buffer = BytesIO()
