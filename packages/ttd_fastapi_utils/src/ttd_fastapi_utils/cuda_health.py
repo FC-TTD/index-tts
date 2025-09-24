@@ -1,35 +1,12 @@
 """
-fastapi-cuda-health
-====================
+TTD FastAPI Utils - CUDA Health Monitor
+---------------------------------------
 
-A lightweight FastAPI plugin that monitors consecutive CUDA failures and exposes a health endpoint.
+Migrated from fastapi-cuda-health (Plan B: global CUDA detection).
+Exposes a one-call setup function `setup_cuda_health(app, ...)`.
 
-Design (Plan B):
-- Global detection without endpoint annotations. Any 5xx HTTPException whose detail contains CUDA keywords
-  is considered a CUDA failure. Uncaught exceptions containing CUDA keywords are also counted.
-- Non-CUDA 5xx responses are recorded as healthy to avoid sticky unhealthy windows.
-- Health becomes unhealthy (HTTP 503) only when the last N results (default 3) are all CUDA failures.
-- The plugin also suppresses uvicorn.access logs for given paths (by default: /health and /docs).
-
-Typical usage:
-    from fastapi import FastAPI
-    from fastapi_cuda_health.plugin import setup_cuda_health
-
-    app = FastAPI()
-    setup_cuda_health(app, path="/health", ready_predicate=lambda: model_is_ready())
-
-Configuration:
-- Threshold N is read from env CONSECUTIVE_FAIL_LIMIT (default 3) or can be passed explicitly.
-- You can provide a notifier object with send_error_message(str) for one-time notifications when health flips unhealthy.
-
-This module exposes:
-- CudaHealthMonitor: internal state tracker for results
-- init_cuda_health_plugin: initialize middleware and exception handler
-- check_health: helper for /health logic
-- mount_health_route: register a GET /health route
-- setup_cuda_health: one-call setup that does init + mount
+Also embeds a simple Notify utility and a default `notifier` for notifications.
 """
-
 from collections import deque
 import logging
 import os
@@ -43,7 +20,6 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 logger = logging.getLogger(__name__)
-
 
 CUDA_KEYWORDS = ("cuda", "cublas", "cudnn", "device-side", "illegal memory")
 
@@ -65,7 +41,11 @@ class CudaHealthMonitor:
         self._last_error_ts: Optional[float] = None
         self._unhealthy_notified: bool = False
         if not notifier:
-            from .notify import notifier as default_notifier
+            # Lazy import to avoid requests dependency if unused
+            try:
+                from .notify import notifier as default_notifier
+            except Exception:
+                default_notifier = None
             notifier = default_notifier
         self._notifier = notifier
 
@@ -125,6 +105,7 @@ def _build_middleware(monitor: CudaHealthMonitor):
     - response >= 500 and no CUDA marker => record_success() (window fill to avoid sticky unhealthy)
     - uncaught exceptions are classified by keyword (monitor.record_error)
     """
+
     async def dispatch(request: Request, call_next: Callable[[Request], Response]):
         try:
             response = await call_next(request)
@@ -144,6 +125,7 @@ def _build_middleware(monitor: CudaHealthMonitor):
             except Exception:
                 logger.exception("记录推理结果失败")
             raise
+
     return dispatch
 
 
@@ -282,7 +264,7 @@ def mount_health_route(app, path: str = "/health"):
     @router.get(path)
     async def _health():
         return check_health(app)
-    
+
     @router.trace(path)
     async def _health():
         return check_health(app, show_trace=True)
@@ -330,3 +312,65 @@ def setup_cuda_health(
     )
     mount_health_route(app, path=path)
     return monitor
+
+
+# --- Simple notifier API (wraps requests) ---
+import json
+import socket
+from datetime import datetime
+
+try:
+    import requests  # type: ignore
+except Exception:  # pragma: no cover - optional
+    requests = None
+
+hostname = socket.gethostname()
+
+
+class TTDNotify:
+    def __init__(self, webhook_url: str):
+        self.muted = False
+        self.webhook_url = webhook_url
+        if os.getenv("ENVIRONMENT", "") == "development":
+            logger.info("Development environment, muted notifications")
+            self.muted = True
+
+    def send_message(self, content: str, level: str = "Info", message_type: str = "text"):
+        if self.muted or not self.webhook_url or requests is None:
+            return
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        content = f"[{level}][{current_time}][{hostname}]\n{content}"
+        headers = {"Content-Type": "application/json"}
+        data = {
+            "msgtype": message_type,
+            "text": {
+                "content": content,
+                "mentioned_list": ["@all"],
+            },
+        }
+        try:
+            resp = requests.post(self.webhook_url, headers=headers, data=json.dumps(data))
+            resp.raise_for_status()
+            result = resp.json()
+            if result.get("errcode") != 0:
+                logger.error(f"Failed to send message: {result}")
+        except Exception:
+            logger.exception("Request error while sending notification")
+
+    def send_error_message(self, error_message: str):
+        self.send_message(error_message, "Error")
+        logger.error(error_message)
+
+    def send_info_message(self, info_message: str):
+        self.send_message(info_message, "Info")
+        logger.info(info_message)
+
+    def send_warning_message(self, warning_message: str):
+        self.send_message(warning_message, "Warning")
+        logger.warning(warning_message)
+
+
+# Default notifier (solidified in package, override with TTD_WEBHOOK_URL)
+_DEFAULT_WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=a72c830d-7d5b-4d88-93e5-326d888600ce"
+_notifier_url = os.getenv("TTD_WEBHOOK_URL", _DEFAULT_WEBHOOK_URL)
+notifier = TTDNotify(_notifier_url)
