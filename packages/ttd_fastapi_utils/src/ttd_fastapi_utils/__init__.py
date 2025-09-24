@@ -1,19 +1,23 @@
-from .plugin import (
+from .postprocess import loudnorm, eq, apply_postprocess
+from .cuda_health import (
     CudaHealthMonitor,
     init_cuda_health_plugin,
     check_health,
     mount_health_route,
     setup_cuda_health,
+    notifier,
 )
 
-from .notify import Notify, notifier
-
 __all__ = [
+    # cuda_health (lazy)
     "CudaHealthMonitor",
     "init_cuda_health_plugin",
     "check_health",
     "mount_health_route",
     "setup_cuda_health",
-    "Notify",
     "notifier",
-    ]
+    # postprocess
+    "loudnorm",
+    "eq",
+    "apply_postprocess",
+]
