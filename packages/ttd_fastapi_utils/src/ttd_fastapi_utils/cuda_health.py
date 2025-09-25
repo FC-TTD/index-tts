@@ -11,6 +11,8 @@ from collections import deque
 import logging
 import os
 import time
+import signal
+import threading
 from typing import Iterable, Optional, Tuple, Callable
 
 from fastapi import HTTPException
@@ -34,12 +36,14 @@ class CudaHealthMonitor:
         Optional object providing `send_error_message(str)`; invoked once when flipping healthy -> unhealthy.
     """
 
-    def __init__(self, limit: int = 3, notifier: Optional[object] = None):
+    def __init__(self, limit: int = 3, notifier: Optional[object] = None, terminate_on_unhealthy: bool = True):
         self.limit = max(1, int(limit or 3))
         self._results: deque[bool] = deque(maxlen=self.limit)
         self._last_error_message: Optional[str] = None
         self._last_error_ts: Optional[float] = None
         self._unhealthy_notified: bool = False
+        self.terminate_on_unhealthy: bool = bool(terminate_on_unhealthy)
+        self._kill_scheduled: bool = False
         if not notifier:
             # Lazy import to avoid requests dependency if unused
             try:
@@ -91,6 +95,27 @@ class CudaHealthMonitor:
                 except Exception:
                     logger.exception("发送不健康通知失败")
                 self._unhealthy_notified = True
+            # Schedule a one-shot self-termination if enabled
+            if self.terminate_on_unhealthy and not self._kill_scheduled:
+                self._kill_scheduled = True
+                def _kill_worker():
+                    try:
+                        # short delay to allow health response/logs to flush
+                        time.sleep(0.5)
+                        logger.error("服务处于不健康状态（连续 CUDA 失败），将终止进程以触发容器重启…")
+                        try:
+                            os.kill(os.getpid(), signal.SIGTERM)
+                        except Exception:
+                            logger.exception("发送 SIGTERM 失败，使用 os._exit(1) 强制退出")
+                            os._exit(1)
+                        # If process still alive after grace period, force exit
+                        time.sleep(2.0)
+                        os._exit(1)
+                    except Exception:
+                        logger.exception("终止任务执行异常，强制退出")
+                        os._exit(1)
+                t = threading.Thread(target=_kill_worker, daemon=True)
+                t.start()
         else:
             self._unhealthy_notified = False
         return (not unhealthy), detail
@@ -135,6 +160,7 @@ def init_cuda_health_plugin(
     notifier: Optional[object] = None,
     suppress_access_paths: Optional[Iterable[str]] = ("/health", "/docs"),
     ready_predicate: Optional[Callable[[], bool]] = None,
+    terminate_on_unhealthy: bool = True,
 ) -> CudaHealthMonitor:
     """Initialize core pieces (middleware + HTTPException handler) and attach monitor to app.state.
 
@@ -158,7 +184,7 @@ def init_cuda_health_plugin(
             limit = int(os.getenv("CONSECUTIVE_FAIL_LIMIT", "3"))
         except Exception:
             limit = 3
-    monitor = CudaHealthMonitor(limit=limit, notifier=notifier)
+    monitor = CudaHealthMonitor(limit=limit, notifier=notifier, terminate_on_unhealthy=terminate_on_unhealthy)
 
     app.add_middleware(BaseHTTPMiddleware, dispatch=_build_middleware(monitor))
 
@@ -282,6 +308,7 @@ def setup_cuda_health(
     notifier: Optional[object] = None,
     suppress_access_paths: Optional[Iterable[str]] = ("/health", "/docs"),
     ready_predicate: Optional[Callable[[], bool]] = None,
+    terminate_on_unhealthy: bool = True,
 ):
     """One-step installation that initializes the plugin and mounts a health route.
 
@@ -309,6 +336,7 @@ def setup_cuda_health(
         notifier=notifier,
         suppress_access_paths=suppress_access_paths,
         ready_predicate=ready_predicate,
+        terminate_on_unhealthy=terminate_on_unhealthy,
     )
     mount_health_route(app, path=path)
     return monitor

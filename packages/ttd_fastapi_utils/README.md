@@ -38,7 +38,13 @@ def ready_predicate():
     return is_ready
 
 # 1) CUDA health
-monitor = setup_cuda_health(app, path="/health", ready_predicate=ready_predicate)
+monitor = setup_cuda_health(
+    app,
+    path="/health",
+    ready_predicate=ready_predicate,
+    # When unhealthy, send SIGTERM to self to trigger container restart (default True)
+    terminate_on_unhealthy=True,
+)
 
 # 2) Postprocess (audio)
 import soundfile as sf
@@ -68,6 +74,12 @@ Public API:
 - `check_health(app, is_ready: Optional[bool] = None, default_unhealthy_detail: str = "CUDA 错误导致不健康")`
 - `mount_health_route(app, path: str = "/health")`
 - `setup_cuda_health(app, ...)`
+
+Parameters (selected):
+
+- `terminate_on_unhealthy: bool = True`
+  When health flips to unhealthy (the last N tracked results are CUDA failures),
+  a background thread sends SIGTERM to the current process (after a short delay) to trigger container restart. If the process does not exit after grace period, the thread calls `os._exit(1)` as a last resort. Set to `False` in local development if you prefer to keep the process running for debugging.
 
 Environment variables:
 

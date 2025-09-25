@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1 (2025-09-24)
+
+- CUDA Health Monitor: add parameter `terminate_on_unhealthy` (default True)
+- When unhealthy (last N results are CUDA failures), a background thread sends SIGTERM to self after a short delay; if the process still runs after grace period, force exit with code 1
+- README updated to reflect the new parameter name and behavior
+
 ## 0.1.0 (2025-09-24)
 
 - Initial release of ttd-fastapi-utils
