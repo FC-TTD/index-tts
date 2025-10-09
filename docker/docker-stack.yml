@@ -3,7 +3,7 @@ version: "3.8"
 services:
 
   api-1:
-    image: ${REGISTRY_URL:-registry:5000}/index-tts/api:${IMAGE_TAG:-latest}
+    image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}
     environment:
       - TZ=Asia/Shanghai
       - NVIDIA_VISIBLE_DEVICES=0
@@ -24,25 +24,36 @@ services:
         failure_action: pause
         order: stop-first  # 关键：先停止再启动
       restart_policy:
-        condition: on-failure
+        condition: any
         max_attempts: 3
       labels:
         caddy: http://index-api
-        # 汇总多个独立 Swarm Service 端点
-        caddy.reverse_proxy: index-tts_api-1:8000 index-tts_api-2:8000 index-tts_api-3:8000 index-tts_api-4:8000
-        # 主动健康检查
+        # 匹配 Header: X-LB-Mode: Premium → 启动主力优先模式
+        caddy.@premium: "header X-LB-Mode *Premium*"
+        # ===== 主力优先逻辑 =====
+        caddy.handle: "@premium"
+        caddy.handle.1_reverse_proxy: "index-tts_api-1:8000 index-tts_api-2:8000 index-tts_api-3:8000 index-tts_api-4:8000"
+        caddy.handle.1_reverse_proxy.lb_policy: "weighted_round_robin 10000 10000 1 1"
+        caddy.handle.1_reverse_proxy.lb_try_duration: 5s
+        caddy.handle.1_reverse_proxy.lb_try_interval: 250ms
+        caddy.handle.1_reverse_proxy.health_uri: /health
+        caddy.handle.1_reverse_proxy.health_interval: 10s
+        caddy.handle.1_reverse_proxy.health_timeout: 2s
+        caddy.handle.1_reverse_proxy.health_fails: 1
+        caddy.handle.1_reverse_proxy.health_passes: 1
+        caddy.handle.1_reverse_proxy.health_status: 200
+        # ===== 默认逻辑：4 节点随机负载 =====
+        caddy.reverse_proxy: "index-tts_api-1:8000 index-tts_api-2:8000 index-tts_api-3:8000 index-tts_api-4:8000"
+        caddy.reverse_proxy.lb_policy: random
         caddy.reverse_proxy.health_uri: /health
-        caddy.reverse_proxy.health_interval: 15s
+        caddy.reverse_proxy.health_interval: 10s
         caddy.reverse_proxy.health_timeout: 2s
-        # 请求内部快速重试
-        caddy.reverse_proxy.lb_try_duration: 5s
-        caddy.reverse_proxy.lb_try_interval: 250ms
-        # （可选扩展示例——如需再开启）
-        # caddy.reverse_proxy.transport.response_header_timeout: 60s
-        # caddy.reverse_proxy.transport.dial_timeout: 5s
+        caddy.reverse_proxy.health_fails: 1
+        caddy.reverse_proxy.health_passes: 1
+        caddy.reverse_proxy.health_status: 200
 
   api-2:
-    image: ${REGISTRY_URL:-registry:5000}/index-tts/api:${IMAGE_TAG:-latest}
+    image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}
     environment:
       - TZ=Asia/Shanghai
       - NVIDIA_VISIBLE_DEVICES=1
@@ -63,11 +74,11 @@ services:
         failure_action: pause
         order: stop-first  # 关键：先停止再启动
       restart_policy:
-        condition: on-failure
+        condition: any
         max_attempts: 3
 
   api-3:
-    image: ${REGISTRY_URL:-registry:5000}/index-tts/api:${IMAGE_TAG:-latest}
+    image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}
     environment:
       - TZ=Asia/Shanghai
       - NVIDIA_VISIBLE_DEVICES=1
@@ -88,11 +99,11 @@ services:
         failure_action: pause
         order: stop-first  # 关键：先停止再启动
       restart_policy:
-        condition: on-failure
+        condition: any
         max_attempts: 3
 
   api-4:
-    image: ${REGISTRY_URL:-registry:5000}/index-tts/api:${IMAGE_TAG:-latest}
+    image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}
     environment:
       - TZ=Asia/Shanghai
       - NVIDIA_VISIBLE_DEVICES=2
@@ -113,7 +124,7 @@ services:
         failure_action: pause
         order: stop-first  # 关键：先停止再启动
       restart_policy:
-        condition: on-failure
+        condition: any
         max_attempts: 3
 
 networks:
