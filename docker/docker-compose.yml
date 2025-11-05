@@ -1,14 +1,16 @@
 services:
-  api-1:
+  indextts:
     build: .
-    image: index-tts/api:latest
-    container_name: indextts-api-1
+    image: index-tts/api:test
+    container_name: indextts-api-test
     environment:
       - TZ=Asia/Shanghai
     volumes:
       - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
     ports:
-      - "380:8000"
+      - "7800:8000"
+    tty: true
+    stdin_open: true
     networks:
       - caddy
     restart: unless-stopped
@@ -17,19 +19,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["0"]        # 指定第0块 GPU
-              capabilities: ["gpu"]
-  api-2:
-    extends: api-1
-    container_name: indextts-api-2
-    ports: !override
-      - "381:8000"
-    deploy: !override
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ["1"]        # 指定第1块 GPU
+              device_ids: ["2"]        # 指定第0块 GPU
               capabilities: ["gpu"]
 
 networks:

@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 import soundfile as sf
 import uvicorn
+import librosa
 
 from indextts.infer_v2 import IndexTTS2
 # Postprocess and CUDA health utilities
@@ -85,6 +86,7 @@ async def lifespan(app: FastAPI):
             device=cmd_args.device,
             use_cuda_kernel=bool(cmd_args.use_cuda_kernel),
             use_deepspeed=bool(cmd_args.use_deepspeed),
+            use_accel=True
         )
         logger.info("IndexTTS2 模型初始化完成")
         yield
@@ -145,6 +147,9 @@ async def generate_audio(
     repetition_penalty: float = Form(10.0),
     max_mel_tokens: int = Form(1500),
     postprocess: bool = Form(True),
+    # 自定义语速/语调
+    speed: float = Form(1.0),
+    pitch: float = Form(0.0),
 ):
     """
     语音生成 API（v2）
@@ -229,6 +234,7 @@ async def generate_audio(
                 emo_text=emo_text,
                 use_random=bool(use_random),
                 interval_silence=int(interval_silence),
+                duration_ratio=float(speed),
                 verbose=cmd_args.verbose,
                 max_text_tokens_per_segment=int(max_text_tokens_per_sentence),
                 **kwargs,
@@ -238,6 +244,13 @@ async def generate_audio(
 
             # 读取生成的音频文件
             wav, sr = sf.read(wav_path, dtype='float32')
+
+            # 可选进行音高移调（在响度/EQ 前）
+            try:
+                if float(pitch) != 0 and abs(float(pitch)) > 1e-6:
+                    wav = librosa.effects.pitch_shift(wav, sr=sr, n_steps=float(pitch))
+            except Exception as _e:
+                logger.exception("音高移调失败，已跳过移调")
 
             if postprocess:
                 wav = apply_postprocess(wav, sr, enable=True)
