@@ -44,7 +44,7 @@ RUN uv pip install flash-attn --no-build-isolation
 COPY . /app
 RUN find /opt/venv -type d -name "__pycache__" -prune -exec rm -rf {} + || true
 EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=30s --start-period=3m --retries=3 \
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5m --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 CMD ["python", "api.py", "--model_dir", "/app/checkpoints", "--host", "0.0.0.0", "--port", "8000", "--fp16"]
