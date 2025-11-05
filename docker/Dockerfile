@@ -39,6 +39,7 @@ RUN --mount=type=cache,target=/root/.cache/uv,id=uv-cache \
 RUN --mount=type=cache,target=/root/.cache/uv,id=uv-cache \
     uv sync --all-extras
 RUN uv pip install -n ttd_fastapi_utils --index-url http://pypi-server/simple/ --trusted-host pypi-server
+RUN uv pip install flash-attn --no-build-isolation
 
 COPY . /app
 RUN find /opt/venv -type d -name "__pycache__" -prune -exec rm -rf {} + || true
