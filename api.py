@@ -48,9 +48,11 @@ parser.add_argument("--port", type=int, default=8000, help="Port to run the API 
 parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to run the API on")
 parser.add_argument("--model_dir", type=str, default="checkpoints", help="Model checkpoints directory")
 parser.add_argument("--fp16", action="store_true", default=False, help="Use FP16 to reduce memory and speed up on CUDA")
-parser.add_argument("--use_cuda_kernel", action="store_true", default=False, help="Use BigVGAN custom CUDA kernel (CUDA only)")
+parser.add_argument("--use_cuda_kernel", action="store_true", default=True, help="Use BigVGAN custom CUDA kernel (CUDA only)")
 parser.add_argument("--device", type=str, default=None, help="Device to run the model on, e.g., 'cuda:0', 'cpu'")
-parser.add_argument("--use_deepspeed", action=argparse.BooleanOptionalAction, default=True, help="Use DeepSpeed if available (default: enabled)")
+parser.add_argument("--use_deepspeed", action=argparse.BooleanOptionalAction, default=False, help="Use DeepSpeed if available (default: disabled)")
+parser.add_argument("--use_accel", action=argparse.BooleanOptionalAction, default=True, help="Use Accelerate for multi-GPU if available (default: disabled)")
+parser.add_argument("--use_torch_compile", action=argparse.BooleanOptionalAction, default=True, help="Use torch.compile for inference (default: disabled)")
 cmd_args = parser.parse_args()
 
 # 检查模型目录是否存在
@@ -86,7 +88,8 @@ async def lifespan(app: FastAPI):
             device=cmd_args.device,
             use_cuda_kernel=bool(cmd_args.use_cuda_kernel),
             use_deepspeed=bool(cmd_args.use_deepspeed),
-            use_accel=True
+            use_accel=bool(cmd_args.use_accel),
+            use_torch_compile=bool(cmd_args.use_torch_compile)
         )
         logger.info("IndexTTS2 模型初始化完成")
         yield
