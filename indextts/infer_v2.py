@@ -649,7 +649,12 @@ class IndexTTS2:
                     dr = float(duration_ratio) if isinstance(duration_ratio, (int, float)) else 1.0
                     if dr <= 0:
                         dr = 1.0
-                    target_lengths = (code_lens * 1.72 / dr).long()
+                    base_len = (code_lens.to(torch.float32) * 1.72)
+                    if dr >= 1.0:
+                        target_lengths = torch.ceil(base_len / dr)
+                    else:
+                        target_lengths = torch.round(base_len / dr)
+                    target_lengths = target_lengths.clamp_min(2).long()
 
                     cond = self.s2mel.models['length_regulator'](S_infer,
                                                                  ylens=target_lengths,
