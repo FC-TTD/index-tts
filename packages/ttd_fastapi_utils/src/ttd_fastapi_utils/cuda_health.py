@@ -195,9 +195,27 @@ def init_cuda_health_plugin(
             class _AccessPathSuppressFilter(logging.Filter):
                 def filter(self, record: logging.LogRecord) -> bool:
                     try:
+                        scope = getattr(record, "scope", None)
+                        if scope:
+                            headers = scope.get("headers") or []
+                            for name, value in headers:
+                                try:
+                                    if name.lower() == b"user-agent" and "uptime-kuma" in value.decode("latin1").lower():
+                                        return False
+                                except Exception:
+                                    break
+                            path = scope.get("path") or ""
+                            if any(path.startswith(p) for p in paths):
+                                return False
+                    except Exception:
+                        pass
+                    try:
                         msg = record.getMessage()
                     except Exception:
                         return True
+                    msg_l = msg.lower()
+                    if "uptime-kuma" in msg_l:
+                        return False
                     return all(p not in msg for p in paths)
 
             logging.getLogger("uvicorn.access").addFilter(_AccessPathSuppressFilter())
@@ -261,7 +279,7 @@ def check_health(app, is_ready: Optional[bool] = None, default_unhealthy_detail:
     if not is_ready:
         raise HTTPException(status_code=503, detail="模型未初始化")
 
-    monitor = getattr(app.state, "cuda_health_monitor", None)
+    monitor: CudaHealthMonitor | None = getattr(app.state, "cuda_health_monitor", None)
     if monitor is None:
         return {"status": "healthy"}
 
@@ -399,6 +417,6 @@ class TTDNotify:
 
 
 # Default notifier (solidified in package, override with TTD_WEBHOOK_URL)
-_DEFAULT_WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=a72c830d-7d5b-4d88-93e5-326d888600ce"
+_DEFAULT_WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=4e5f3845-cd5f-43a0-b004-231e710c68e4"
 _notifier_url = os.getenv("TTD_WEBHOOK_URL", _DEFAULT_WEBHOOK_URL)
 notifier = TTDNotify(_notifier_url)
