@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2 (2025-11-26)
+
+- Enhanced health check log filtering and notification configuration
+- Improved access log filter to identify and block uptime-kuma monitoring requests by User-Agent and message content
+- Added exception handling to ensure robustness of log filtering
+- Added type annotations for `check_health` function's monitor variable
+- Updated default webhook URL configuration
+
 ## 0.1.1 (2025-09-24)
 
 - CUDA Health Monitor: add parameter `terminate_on_unhealthy` (default True)
