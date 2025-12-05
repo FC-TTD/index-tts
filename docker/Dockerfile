@@ -44,7 +44,7 @@ RUN uv pip install flash-attn --no-build-isolation
 COPY . /app
 RUN find /opt/venv -type d -name "__pycache__" -prune -exec rm -rf {} + || true
 EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5m --retries=3 \
+HEALTHCHECK --interval=30s --timeout=30s --start-period=10m --retries=5 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 ENV TTD_WEBHOOK_URL="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=4e5f3845-cd5f-43a0-b004-231e710c68e4"
