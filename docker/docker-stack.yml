@@ -25,7 +25,8 @@ services:
         order: stop-first  # 关键：先停止再启动
       restart_policy:
         condition: any
-        max_attempts: 3
+        max_attempts: 10
+        delay: 10s
       labels:
         caddy: http://index-api
         # 匹配 Header: X-LB-Mode: Premium → 启动主力优先模式
@@ -75,7 +76,8 @@ services:
         order: stop-first  # 关键：先停止再启动
       restart_policy:
         condition: any
-        max_attempts: 3
+        max_attempts: 10
+        delay: 10s
 
   api-3:
     image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}
@@ -100,7 +102,8 @@ services:
         order: stop-first  # 关键：先停止再启动
       restart_policy:
         condition: any
-        max_attempts: 3
+        max_attempts: 10
+        delay: 10s
 
   api-4:
     image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}
@@ -125,7 +128,8 @@ services:
         order: stop-first  # 关键：先停止再启动
       restart_policy:
         condition: any
-        max_attempts: 3
+        max_attempts: 10
+        delay: 10s
 
 networks:
   caddy:
