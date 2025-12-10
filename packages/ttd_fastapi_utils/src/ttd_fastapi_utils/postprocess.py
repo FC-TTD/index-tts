@@ -98,6 +98,52 @@ def eq(wav_data: np.ndarray, sr: int) -> np.ndarray:
     return enhanced_audio
 
 
+def trim_silence(wav_data: np.ndarray, sr: int, threshold_db: float = -40.0, min_silence_duration_ms: int = 200) -> np.ndarray:
+    """对音频首尾静音段进行裁剪。
+
+    Parameters
+    ----------
+    wav_data : np.ndarray
+        输入音频数据。
+    sr : int
+        采样率。
+    threshold_db : float
+        静音判定阈值（分贝），低于该阈值的部分视为静音。
+    min_silence_duration_ms : int
+        在开始和结束处保留的静音时长（毫秒）。
+    """
+    import librosa
+    
+    # 使用 librosa 来裁剪静音
+    # top_db = -threshold_db（librosa 使用相对于峰值的正 dB）
+    
+    # Convert numpy array to float32 if needed for librosa
+    if wav_data.dtype != np.float32 and wav_data.dtype != np.float64:
+        wav_data = wav_data.astype(np.float32)
+
+    # top_db：相对于参考电平的静音阈值（单位 dB）
+    top_db = -threshold_db
+    
+    try:
+        non_silent_intervals = librosa.effects.split(wav_data, top_db=top_db)
+        if len(non_silent_intervals) == 0:
+            return wav_data # 如果整段都是静音，则直接返回原始音频
+            
+        start_idx = non_silent_intervals[0][0]
+        end_idx = non_silent_intervals[-1][1]
+        
+        # 计算需要保留的首尾静音样本数
+        pad_samples = int(min_silence_duration_ms * sr / 1000)
+        
+        start_idx = max(0, start_idx - pad_samples)
+        end_idx = min(len(wav_data), end_idx + pad_samples)
+        
+        return wav_data[start_idx:end_idx]
+    except Exception:
+        # 如果 librosa 调用失败，则直接返回原始音频作为降级策略
+        return wav_data
+
+
 def apply_postprocess(wav: np.ndarray, sr: int, enable: bool = True) -> np.ndarray:
     """Apply loudnorm + eq with exception safety."""
     if not enable:

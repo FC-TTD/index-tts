@@ -1,4 +1,4 @@
-from .postprocess import loudnorm, eq, apply_postprocess
+from .postprocess import loudnorm, eq, apply_postprocess, trim_silence
 from .cuda_health import (
     CudaHealthMonitor,
     init_cuda_health_plugin,
@@ -20,4 +20,5 @@ __all__ = [
     "loudnorm",
     "eq",
     "apply_postprocess",
+    "trim_silence",
 ]
