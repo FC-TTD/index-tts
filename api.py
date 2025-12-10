@@ -28,9 +28,9 @@ import librosa
 from indextts.infer_v2 import IndexTTS2
 # Postprocess and CUDA health utilities
 try:
-    from ttd_fastapi_utils import setup_cuda_health, apply_postprocess
+    from ttd_fastapi_utils import setup_cuda_health, apply_postprocess, trim_silence
 except ImportError:
-    from packages.ttd_fastapi_utils.src.ttd_fastapi_utils import setup_cuda_health, apply_postprocess
+    from packages.ttd_fastapi_utils.src.ttd_fastapi_utils import setup_cuda_health, apply_postprocess, trim_silence
 
 # FastAPI 相关导入
 
@@ -149,6 +149,7 @@ async def generate_audio(
     num_beams: int = Form(3),
     repetition_penalty: float = Form(10.0),
     max_mel_tokens: int = Form(1500),
+    remove_silence: bool = Form(True),
     postprocess: bool = Form(True),
     # 自定义语速/语调
     speed: float = Form(1.0),
@@ -171,6 +172,7 @@ async def generate_audio(
         interval_silence: 句间静音时长（毫秒，默认 200）
         max_text_tokens_per_sentence: 分句的最大 token 数（默认 120）
         do_sample/top_p/top_k/temperature/length_penalty/num_beams/repetition_penalty/max_mel_tokens: 采样与长度控制参数
+        remove_silence: 是否自动切除首尾静音（默认 True）
         postprocess: 是否进行响度归一化和EQ后处理（默认 True）
 
     返回：
@@ -247,6 +249,13 @@ async def generate_audio(
 
             # 读取生成的音频文件
             wav, sr = sf.read(wav_path, dtype='float32')
+
+            # 静音切除
+            if remove_silence:
+                try:
+                    wav = trim_silence(wav, sr)
+                except Exception:
+                    logger.exception("静音切除失败，已跳过")
 
             # 可选进行音高移调（在响度/EQ 前）
             try:
