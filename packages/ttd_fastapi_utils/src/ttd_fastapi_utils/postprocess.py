@@ -98,7 +98,15 @@ def eq(wav_data: np.ndarray, sr: int) -> np.ndarray:
     return enhanced_audio
 
 
-def trim_silence(wav_data: np.ndarray, sr: int, threshold_db: float = -40.0, min_silence_duration_ms: int = 200) -> np.ndarray:
+def trim_silence(
+    wav_data: np.ndarray,
+    sr: int,
+    threshold_db: float = -40.0,
+    min_silence_duration_ms: int = 200,
+    min_segment_ms: int = 50,
+    ignore_trailing_gap_ms: int = 300,
+    fade_ms: int = 10,
+) -> np.ndarray:
     """对音频首尾静音段进行裁剪。
 
     Parameters
@@ -111,6 +119,12 @@ def trim_silence(wav_data: np.ndarray, sr: int, threshold_db: float = -40.0, min
         静音判定阈值（分贝），低于该阈值的部分视为静音。
     min_silence_duration_ms : int
         在开始和结束处保留的静音时长（毫秒）。
+    min_segment_ms : int
+        最小保留片段时长（毫秒），小于此长度的非静音片段会被忽略。
+    ignore_trailing_gap_ms : int
+        如果尾部片段与前一片段间隔超过此值且自身很短，则将其视为噪音丢弃。
+    fade_ms : int
+        裁剪后首尾淡入淡出时长（毫秒）。
     """
     import librosa
     
@@ -125,20 +139,51 @@ def trim_silence(wav_data: np.ndarray, sr: int, threshold_db: float = -40.0, min
     top_db = -threshold_db
     
     try:
-        non_silent_intervals = librosa.effects.split(wav_data, top_db=top_db)
+        # 转 float，兼容多声道
+        if wav_data.ndim > 1:
+            wav_mono = np.mean(wav_data, axis=1) if wav_data.shape[0] < wav_data.shape[1] else np.mean(wav_data, axis=0)
+        else:
+            wav_mono = wav_data
+
+        non_silent_intervals = librosa.effects.split(wav_mono, top_db=top_db)
         if len(non_silent_intervals) == 0:
-            return wav_data # 如果整段都是静音，则直接返回原始音频
-            
-        start_idx = non_silent_intervals[0][0]
-        end_idx = non_silent_intervals[-1][1]
-        
-        # 计算需要保留的首尾静音样本数
+            return wav_data
+
+        min_len = int(min_segment_ms / 1000 * sr)
+        intervals = [i for i in non_silent_intervals if (i[1] - i[0]) >= min_len]
+        if not intervals:
+            # 保留最长片段，避免极短语料被全切除
+            lengths = [i[1] - i[0] for i in non_silent_intervals]
+            intervals = [non_silent_intervals[int(np.argmax(lengths))]]
+
+        # 丢弃尾部与主体间隔过大且很短的片段
+        if len(intervals) > 1:
+            last_i, prev_i = intervals[-1], intervals[-2]
+            gap_ms = (last_i[0] - prev_i[1]) / sr * 1000
+            last_ms = (last_i[1] - last_i[0]) / sr * 1000
+            if gap_ms > ignore_trailing_gap_ms and last_ms < 200:
+                intervals.pop()
+
+        start_idx, end_idx = intervals[0][0], intervals[-1][1]
         pad_samples = int(min_silence_duration_ms * sr / 1000)
-        
         start_idx = max(0, start_idx - pad_samples)
         end_idx = min(len(wav_data), end_idx + pad_samples)
-        
-        return wav_data[start_idx:end_idx]
+
+        trimmed = wav_data[start_idx:end_idx]
+
+        # 10ms 淡入淡出，防止切割爆音
+        fade_samples = int(fade_ms / 1000 * sr)
+        if fade_samples > 0 and len(trimmed) > 2 * fade_samples:
+            fade_in = np.linspace(0.0, 1.0, fade_samples)
+            fade_out = np.linspace(1.0, 0.0, fade_samples)
+            if trimmed.ndim == 1:
+                trimmed[:fade_samples] *= fade_in
+                trimmed[-fade_samples:] *= fade_out
+            else:
+                trimmed[:fade_samples, ...] *= fade_in[:, None]
+                trimmed[-fade_samples:, ...] *= fade_out[:, None]
+
+        return trimmed
     except Exception:
         # 如果 librosa 调用失败，则直接返回原始音频作为降级策略
         return wav_data
