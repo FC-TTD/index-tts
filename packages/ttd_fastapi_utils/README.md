@@ -96,10 +96,13 @@ Environment variables:
   - Simple high-band enhancement with safe Butterworth band-pass
 - `apply_postprocess(wav, sr, enable=True)`
   - Convenience wrapper with exception safety
-- `trim_silence(wav, sr, threshold_db=-40.0, min_silence_duration_ms=200)`
+- `trim_silence(wav, sr, threshold_db=-40.0, min_silence_duration_ms=200, min_segment_ms=50, ignore_trailing_gap_ms=300, fade_ms=10)`
   - Trims leading and trailing silence using librosa.effects.split.
   - `threshold_db`: Silence threshold relative to peak (default -40dB).
   - `min_silence_duration_ms`: Silence padding to keep (default 200ms).
+  - `min_segment_ms`: Minimum length of non-silent segment to keep (default 50ms).
+  - `ignore_trailing_gap_ms`: If last segment is far from previous (gap > this) and short, drop it (default 300ms).
+  - `fade_ms`: Fade in/out duration (default 10ms).
 
 ## Changelog
 
