@@ -2,10 +2,12 @@
 
 TTD FastAPI Utils: a small utility collection for FastAPI services.
 
-Includes two components:
+Includes four modules:
 
-- CUDA Health Monitor: Global CUDA-aware health check (Plan B) that tracks recent failures and mounts `/health`.
-- Postprocess: Audio post-processing helpers, including LUFS-based loudness normalization with short-audio padding and a simple EQ.
+- `cuda_health`: Global CUDA-aware health check (Plan B) that tracks recent failures.
+- `home_probe`: Default home probe payload (app/build/container info) for reverse proxies.
+- `ttd_notify`: A simple notifier helper (default webhook URL can be overridden via env).
+- `postprocess`: Audio post-processing helpers, including LUFS-based loudness normalization with short-audio padding and a simple EQ.
 
 ## Install (monorepo)
 
@@ -65,6 +67,9 @@ async def generate():
   - Uncaught exceptions with CUDA keywords are treated as CUDA failures
   - Non-CUDA 5xx responses are recorded as healthy to avoid sticky unhealthy
 - Suppresses `uvicorn.access` logs for `/health` and `/docs` by default
+- Optional default home probe for reverse proxies
+  - If enabled, GET/HEAD `/` returns 200 when healthy, or 503 when unhealthy
+  - Response payload includes app name, build info, and container info
 - Provides a notifier hook (`Notify`) for one-shot alerting when flipping unhealthy
 
 Public API:
@@ -81,10 +86,30 @@ Parameters (selected):
   When health flips to unhealthy (the last N tracked results are CUDA failures),
   a background thread sends SIGTERM to the current process (after a short delay) to trigger container restart. If the process does not exit after grace period, the thread calls `os._exit(1)` as a last resort. Set to `False` in local development if you prefer to keep the process running for debugging.
 
+- `enable_default_home: bool = True`
+  When enabled, installs a middleware that serves default home probe response at `/` if you have not defined your own GET/HEAD `/` route.
+
+- `suppress_access_paths: Optional[Iterable[str]] = None`
+  If `None`, defaults to `("/health", "/docs")`, and also includes `"/"` when `enable_default_home=True`.
+
 Environment variables:
 
 - `CONSECUTIVE_FAIL_LIMIT` (default `3`)
 - `TTD_WEBHOOK_URL` (optional) for default notifier
+- `APP_NAME` (optional) for default home probe payload when `FastAPI(title=...)` is not set
+- `BUILDINFO_PATH` (optional) buildinfo json path
+- `BUILD_COMMIT`, `BUILD_TIME` (optional) fallback build metadata when buildinfo file is not present
+
+### Home Probe
+
+- `build_home_payload(app_name, healthy, unhealthy_detail)`
+  - Includes build info from `BUILDINFO_PATH` / `buildinfo.json` (fallback to `BUILD_COMMIT` / `BUILD_TIME`)
+  - Includes container info from env and `/proc/self/cgroup`
+
+### Notify
+
+- `notifier`
+  - Default webhook URL can be overridden via `TTD_WEBHOOK_URL`
 
 ### Postprocess
 

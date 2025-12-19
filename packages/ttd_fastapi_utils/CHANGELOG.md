@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.0 (2025-12-19)
+
+- CUDA Health Monitor: refactored module layout
+  - Core CUDA health monitor logic lives in `ttd_fastapi_utils.cuda_health`
+  - FastAPI integration entry lives in `ttd_fastapi_utils.fastapi_entry`
+  - Default home probe payload lives in `ttd_fastapi_utils.home_probe`
+  - Notifier helper lives in `ttd_fastapi_utils.ttd_notify`
+- Default home probe (GET/HEAD `/`)
+  - Enabled by default via `setup_cuda_health(..., enable_default_home=True)`
+  - Returns 200 when healthy, 503 when unhealthy
+  - Payload includes app name, build info, and container info
+- Access log suppression
+  - `suppress_access_paths` is now `None` by default in `setup_cuda_health`
+  - When `enable_default_home=True` and `suppress_access_paths` is not provided, `/` is suppressed by default (along with `/health` and `/docs`)
+  - Suppression for `/` uses exact match to avoid filtering all paths
+- Breaking change
+  - The internal module `ttd_fastapi_utils.cuda_core` was removed/renamed. Import from `ttd_fastapi_utils.cuda_health` instead.
+
 ## 0.1.2 (2025-11-26)
 
 - Enhanced health check log filtering and notification configuration
