@@ -5,6 +5,7 @@ import scipy.signal as signal
 from typing import Tuple
 
 logger = logging.getLogger(__name__)
+_LIBROSA_IMPORT_WARNED = False
 
 
 def limiter(data: np.ndarray, threshold: float = 0.99) -> np.ndarray:
@@ -156,8 +157,6 @@ def trim_silence(
     fade_ms : int
         裁剪后首尾淡入淡出时长（毫秒）。
     """
-    import librosa
-    
     # 使用 librosa 来裁剪静音
     # top_db = -threshold_db（librosa 使用相对于峰值的正 dB）
     
@@ -169,6 +168,15 @@ def trim_silence(
     top_db = -threshold_db
     
     try:
+        global _LIBROSA_IMPORT_WARNED
+        try:
+            import librosa
+        except Exception:
+            if not _LIBROSA_IMPORT_WARNED:
+                _LIBROSA_IMPORT_WARNED = True
+                logger.warning("后处理: 未安装 librosa，已跳过 trim_silence")
+            return wav_data
+
         # 转 float，兼容多声道
         if wav_data.ndim > 1:
             # Heuristic: if shape[0] < shape[1], assume (Channels, Samples)
