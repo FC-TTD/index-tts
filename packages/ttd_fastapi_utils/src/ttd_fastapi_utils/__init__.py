@@ -1,6 +1,6 @@
 from .cuda_health import CudaHealthMonitor
 from .fastapi_entry import check_health, init_cuda_health_plugin, mount_health_route, setup_cuda_health
-from .postprocess import apply_postprocess, eq, loudnorm, trim_silence
+from .postprocess import apply_postprocess, eq, limiter, loudnorm, trim_silence
 from .ttd_notify import notifier
 
 __all__ = [
@@ -13,6 +13,7 @@ __all__ = [
     # postprocess
     "loudnorm",
     "eq",
+    "limiter",
     "apply_postprocess",
     "trim_silence",
     # notify

@@ -117,10 +117,13 @@ Environment variables:
   - Pads short audio to `block_sec` for LUFS calculation, then applies gain to original length
   - Falls back to peak limiting when LUFS fails
   - Multi-channel: only the first channel is used and returned
+- `limiter(data, threshold=0.99)`
+  - A simple peak limiter that scales samples above `threshold` down to `threshold` (element-wise)
+  - Used by `loudnorm(...)` internally via its `threshold` parameter
 - `eq(wav, sr)`
   - Simple high-band enhancement with safe Butterworth band-pass
 - `apply_postprocess(wav, sr, enable=True)`
-  - Convenience wrapper with exception safety
+  - Convenience wrapper with exception safety (`loudnorm` + `eq`, so limiter is applied via `loudnorm`)
 - `trim_silence(wav, sr, threshold_db=-40.0, min_silence_duration_ms=200, min_segment_ms=50, ignore_trailing_gap_ms=300, fade_ms=10)`
   - Trims leading and trailing silence using librosa.effects.split.
   - `threshold_db`: Silence threshold relative to peak (default -40dB).
