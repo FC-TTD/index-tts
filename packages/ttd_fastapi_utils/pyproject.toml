@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ttd-fastapi-utils"
-version = "0.2.2"
+version = "0.2.3"
 description = "TTD FastAPI Utils: cuda_health (/health + optional home probe /), home_probe payload, ttd_notify notifier, and postprocess utilities (loudness/EQ/limiter)"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 license = { file = "LICENSE" }
 authors = [
   { name = "huanghuan", email = "huanghuan@fc-ttd.net" }
@@ -24,11 +24,11 @@ classifiers = [
   "Environment :: GPU"
 ]
 dependencies = [
-  "fastapi>=0.100",
-  "numpy>=1.22",
-  "scipy>=1.10",
-  "pyloudnorm>=0.1.1",
-  "requests>=2.31",
+  "fastapi>=0.95",
+  "numpy>=1.19",
+  "scipy>=1.5",
+  "pyloudnorm>=0.1.0",
+  "requests>=2.0",
 ]
 
 [tool.hatch.build.targets.wheel]

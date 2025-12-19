@@ -156,7 +156,7 @@ def check_health(
     if not is_ready:
         raise HTTPException(status_code=503, detail="模型未初始化")
 
-    monitor: CudaHealthMonitor | None = getattr(app.state, "cuda_health_monitor", None)
+    monitor: Optional[CudaHealthMonitor] = getattr(app.state, "cuda_health_monitor", None)
     if monitor is None:
         return {"status": "healthy"}
 
