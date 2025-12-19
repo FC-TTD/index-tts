@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 (2025-12-19)
+
+- Postprocess: add `limiter(data, threshold=...)`
+  - Used by `loudnorm(...)` internally via its `threshold` parameter
+
 ## 0.2.0 (2025-12-19)
 
 - CUDA Health Monitor: refactored module layout

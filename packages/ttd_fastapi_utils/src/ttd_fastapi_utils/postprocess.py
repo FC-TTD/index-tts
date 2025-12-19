@@ -7,6 +7,31 @@ from typing import Tuple
 logger = logging.getLogger(__name__)
 
 
+def limiter(data: np.ndarray, threshold: float = 0.99) -> np.ndarray:
+    """
+    Apply a simple limiter to the audio data.
+    
+    Parameters:
+    - data: NumPy array of audio data (float)
+    - threshold: The threshold level for the limiter (linear scale, e.g., 0.99 for -0.1 dB)
+    
+    Returns:
+    - Limited audio data as a NumPy array (float)
+    """
+    # Calculate the gain reduction factor
+    # Support both single and multi-channel (element-wise)
+    abs_data = np.abs(data)
+    # Avoid division by zero
+    abs_data = np.where(abs_data == 0, 1e-10, abs_data)
+    
+    reduction_factor = np.where(abs_data > threshold, threshold / abs_data, 1.0)
+    
+    # Apply the gain reduction to the audio signal
+    limited_audio = data * reduction_factor
+    
+    return limited_audio
+
+
 def loudnorm(
     wav_data: np.ndarray,
     sr: int,
@@ -65,10 +90,8 @@ def loudnorm(
         original_loudness = float("nan")
         wav_norm = wav_mono if 'wav_mono' in locals() else wav_data
 
-    abs_wav = np.abs(wav_norm)
-    abs_wav = np.where(abs_wav == 0, 1e-10, abs_wav)
-    reduction_factor = np.where(abs_wav > threshold, threshold / abs_wav, 1.0)
-    limited_audio = wav_norm * reduction_factor
+    # Use the standalone limiter function
+    limited_audio = limiter(wav_norm, threshold)
     return limited_audio, original_loudness
 
 
