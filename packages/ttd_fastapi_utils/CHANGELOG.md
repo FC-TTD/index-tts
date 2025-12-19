@@ -15,9 +15,7 @@
   - `suppress_access_paths` is now `None` by default in `setup_cuda_health`
   - When `enable_default_home=True` and `suppress_access_paths` is not provided, `/` is suppressed by default (along with `/health` and `/docs`)
   - Suppression for `/` uses exact match to avoid filtering all paths
-- Breaking change
-  - The internal module `ttd_fastapi_utils.cuda_core` was removed/renamed. Import from `ttd_fastapi_utils.cuda_health` instead.
-
+  
 ## 0.1.2 (2025-11-26)
 
 - Enhanced health check log filtering and notification configuration
