@@ -121,12 +121,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
-async def root():
-    """API 根路径"""
-    return {"message": "欢迎使用 IndexTTS API 服务"}
-
-
 @app.post("/generate")
 async def generate_audio(
     text: str = Form(...),
