@@ -7,4 +7,4 @@
       pypi_pub_url: "https://pypi-server"
       pypi_pub_curl_verbose: false
       pypi_pub_curl_ignore_conflict: true
-      pypi_pub_package_path: ttd_fastapi_utils
+      pypi_pub_package_path: ttd_fastapi_utils # 这样是正确的，role会自动处理相对路径

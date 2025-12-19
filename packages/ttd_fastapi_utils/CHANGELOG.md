@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2 (2025-12-19)
+
+- Postprocess
+  - `apply_postprocess(wav, sr, target_loudness=..., enable=True)` now accepts `target_loudness` and forwards it to `loudnorm(...)`
+  - `apply_postprocess(...)` now accepts `trim_silence` (default False) to optionally run `trim_silence(wav, sr)` before `loudnorm + eq`
+  - Improved multi-channel handling heuristics for `(T, C)` and `(C, T)` shaped arrays in `loudnorm(...)` and `trim_silence(...)`
+
 ## 0.2.1 (2025-12-19)
 
 - Postprocess: add `limiter(data, threshold=...)`

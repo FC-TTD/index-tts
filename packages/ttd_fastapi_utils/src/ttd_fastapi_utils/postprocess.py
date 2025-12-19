@@ -53,11 +53,18 @@ def loudnorm(
         if not np.issubdtype(wav_data.dtype, np.floating):
             wav_data = wav_data.astype(np.float32)
         if wav_data.ndim == 2:
-            try:
-                logger.warning("后处理: 输入为多通道音频，仅使用第一个声道参与处理并作为输出")
-            except Exception:
-                pass
-            wav_mono = wav_data[:, 0]
+            # Heuristic: if shape[0] < shape[1], assume (Channels, Samples) -> (1, T) or (2, T)
+            # Otherwise assume (Samples, Channels) -> (T, 1) or (T, 2)
+            if wav_data.shape[0] < wav_data.shape[1]:
+                 # (C, T) -> Take first channel
+                wav_mono = wav_data[0, :]
+            else:
+                # (T, C) -> Take first channel
+                try:
+                    logger.warning("后处理: 输入为多通道音频(T, C)，仅使用第一个声道参与处理并作为输出")
+                except Exception:
+                    pass
+                wav_mono = wav_data[:, 0]
         else:
             wav_mono = wav_data
 
@@ -164,7 +171,11 @@ def trim_silence(
     try:
         # 转 float，兼容多声道
         if wav_data.ndim > 1:
-            wav_mono = np.mean(wav_data, axis=1) if wav_data.shape[0] < wav_data.shape[1] else np.mean(wav_data, axis=0)
+            # Heuristic: if shape[0] < shape[1], assume (Channels, Samples)
+            if wav_data.shape[0] < wav_data.shape[1]:
+                wav_mono = np.mean(wav_data, axis=0)
+            else:
+                wav_mono = np.mean(wav_data, axis=1)
         else:
             wav_mono = wav_data
 
@@ -212,12 +223,14 @@ def trim_silence(
         return wav_data
 
 
-def apply_postprocess(wav: np.ndarray, sr: int, enable: bool = True) -> np.ndarray:
+def apply_postprocess(wav: np.ndarray, sr: int, target_loudness: float = -23.0, enable: bool = True, trim_silence: bool = False) -> np.ndarray:
     """Apply loudnorm + eq with exception safety."""
     if not enable:
         return wav
     try:
-        wav_p, _ = loudnorm(wav, sr)
+        if trim_silence:
+            wav = trim_silence(wav, sr)
+        wav_p, _ = loudnorm(wav, sr, target_loudness=target_loudness)
         wav_p = eq(wav_p, sr)
         return wav_p
     except Exception:
