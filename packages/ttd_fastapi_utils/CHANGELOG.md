@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.4 (2026-01-24)
+
+- SmartModel: New model lifecycle management wrapper
+  - Added `SmartModel` class for lazy loading and auto-unloading of models
+  - Supports configurable timeout-based auto-unloading (TTL) with background monitoring
+  - Includes manual `unload()` method and automatic GPU memory cleanup
+  - Thread-safe implementation with proper locking mechanisms
+  - Updated package description to include SmartModel functionality
+
+## 0.2.3 (2025-12-20)
+
+- Compatibility improvements
+  - Lowered Python version requirement from >=3.9 to >=3.8
+  - Relaxed core dependency version constraints for broader compatibility:
+    - fastapi: >=0.100 → >=0.95
+    - numpy: >=1.22 → >=1.19
+    - scipy: >=1.10 → >=1.5
+    - pyloudnorm: >=0.1.1 → >=0.1.0
+    - requests: >=2.31 → >=2.0
+  - Added `from __future__ import annotations` to cuda_health.py for Python 3.8 type annotation support
+  - Removed deprecated cuda_health_legacy.py file
+
 ## 0.2.2 (2025-12-19)
 
 - Postprocess
