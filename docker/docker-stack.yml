@@ -17,7 +17,7 @@ services:
       endpoint_mode: dnsrr
       placement:
         constraints:
-          - node.hostname == ttd-edge
+          - node.hostname == ttd-worker
       update_config:
         parallelism: 0
         delay: 0s
@@ -33,7 +33,7 @@ services:
         caddy.@premium: "header X-LB-Mode *Premium*"
         # ===== 主力优先逻辑 =====
         caddy.handle: "@premium"
-        caddy.handle.1_reverse_proxy: "index-tts_api-1:8000 index-tts_api-2:8000 index-tts_api-3:8000 index-tts_api-4:8000"
+        caddy.handle.1_reverse_proxy: "index-tts_api-1:8000 index-tts_api-2:8000 index-tts_api-3:8000"
         caddy.handle.1_reverse_proxy.lb_policy: "weighted_round_robin 10000 10000 1 1"
         caddy.handle.1_reverse_proxy.lb_try_duration: 5s
         caddy.handle.1_reverse_proxy.lb_try_interval: 250ms
@@ -44,7 +44,7 @@ services:
         caddy.handle.1_reverse_proxy.health_passes: 1
         caddy.handle.1_reverse_proxy.health_status: 200
         # ===== 默认逻辑：4 节点随机负载 =====
-        caddy.reverse_proxy: "index-tts_api-1:8000 index-tts_api-2:8000 index-tts_api-3:8000 index-tts_api-4:8000"
+        caddy.reverse_proxy: "index-tts_api-1:8000 index-tts_api-2:8000 index-tts_api-3:8000"
         caddy.reverse_proxy.lb_policy: random
         caddy.reverse_proxy.health_uri: /health
         caddy.reverse_proxy.health_interval: 10s
@@ -54,32 +54,6 @@ services:
         caddy.reverse_proxy.health_status: 200
 
   api-2:
-    image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}
-    environment:
-      - TZ=Asia/Shanghai
-      - NVIDIA_VISIBLE_DEVICES=1
-    volumes:
-      - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
-    networks:
-      - caddy
-    deploy:
-      mode: replicated
-      replicas: 1
-      endpoint_mode: dnsrr
-      placement:
-        constraints:
-          - node.hostname == ttd-edge
-      update_config:
-        parallelism: 0
-        delay: 0s
-        failure_action: pause
-        order: stop-first  # 关键：先停止再启动
-      restart_policy:
-        condition: any
-        max_attempts: 10
-        delay: 10s
-
-  api-3:
     image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}
     environment:
       - TZ=Asia/Shanghai
@@ -105,7 +79,7 @@ services:
         max_attempts: 10
         delay: 10s
 
-  api-4:
+  api-3:
     image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}
     environment:
       - TZ=Asia/Shanghai
@@ -130,6 +104,32 @@ services:
         condition: any
         max_attempts: 10
         delay: 10s
+
+  # api-4:
+  #   image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}
+  #   environment:
+  #     - TZ=Asia/Shanghai
+  #     - NVIDIA_VISIBLE_DEVICES=2
+  #   volumes:
+  #     - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
+  #   networks:
+  #     - caddy
+  #   deploy:
+  #     mode: replicated
+  #     replicas: 1
+  #     endpoint_mode: dnsrr
+  #     placement:
+  #       constraints:
+  #         - node.hostname == ttd-worker
+  #     update_config:
+  #       parallelism: 0
+  #       delay: 0s
+  #       failure_action: pause
+  #       order: stop-first  # 关键：先停止再启动
+  #     restart_policy:
+  #       condition: any
+  #       max_attempts: 10
+  #       delay: 10s
 
 networks:
   caddy:

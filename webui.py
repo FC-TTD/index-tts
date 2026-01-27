@@ -2,6 +2,7 @@ import html
 import json
 import os
 import sys
+import atexit
 import threading
 import time
 
@@ -87,6 +88,11 @@ from indextts.utils.examples_downloader import ensure_examples_available
 from indextts.utils.presets import list_presets, save_preset, load_preset, delete_preset
 from tools.i18n.i18n import I18nAuto
 
+try:
+    from ttd_fastapi_utils import SmartModel
+except ImportError:
+    from packages.ttd_fastapi_utils.src.ttd_fastapi_utils import SmartModel
+
 i18n = I18nAuto(language="Auto")
 MODE = 'local'
 
@@ -106,7 +112,29 @@ def build_tts(use_accel=False, use_torch_compile=False):
     )
 
 
-tts = build_tts(use_accel=cmd_args.accel, use_torch_compile=cmd_args.torch_compile)
+def _tts_loader():
+    return build_tts(use_accel=cmd_args.accel, use_torch_compile=cmd_args.torch_compile)
+
+tts_manager = SmartModel(_tts_loader, timeout_seconds=7200)
+
+def get_tts():
+    return tts_manager.get()
+
+_tts_boot = get_tts()
+model_version = _tts_boot.model_version or "1.0"
+glossary_enabled = bool(_tts_boot.normalizer.enable_glossary)
+max_mel_tokens_limit = int(_tts_boot.cfg.gpt.max_mel_tokens)
+max_text_tokens_limit = int(_tts_boot.cfg.gpt.max_text_tokens)
+del _tts_boot
+tts_manager.unload()
+
+def _cleanup_tts_manager():
+    try:
+        tts_manager.unload()
+    finally:
+        tts_manager.stop()
+
+atexit.register(_cleanup_tts_manager)
 # 支持的语言列表
 LANGUAGES = {
     "中文": "zh_CN",
@@ -159,6 +187,7 @@ def get_example_cases(include_experimental = False):
 
 def format_glossary_markdown():
     """将词汇表转换为Markdown表格格式"""
+    tts = get_tts()
     if not tts.normalizer.term_glossary:
         return i18n("暂无术语")
 
@@ -568,6 +597,7 @@ def gen_single(emo_control_method,prompt, text,
                emo_text,emo_random,
                max_text_tokens_per_segment=120,
                 *args, progress=gr.Progress()):
+    tts = get_tts()
     output_path = None
     if not output_path:
         output_path = os.path.join("outputs", f"spk_{int(time.time())}.wav")
@@ -606,14 +636,15 @@ def gen_single(emo_control_method,prompt, text,
         emo_text = None
 
     print(f"Emo control mode:{emo_control_method},weight:{emo_weight},vec:{vec}")
-    output = tts.infer(spk_audio_prompt=prompt, text=text,
-                       output_path=output_path,
-                       emo_audio_prompt=emo_ref_path, emo_alpha=emo_weight,
-                       emo_vector=vec,
-                       use_emo_text=(emo_control_method==3), emo_text=emo_text,use_random=emo_random,
-                       verbose=cmd_args.verbose,
-                       max_text_tokens_per_segment=int(max_text_tokens_per_segment),
-                       **kwargs)
+    with mutex:
+        output = tts.infer(spk_audio_prompt=prompt, text=text,
+                           output_path=output_path,
+                           emo_audio_prompt=emo_ref_path, emo_alpha=emo_weight,
+                           emo_vector=vec,
+                           use_emo_text=(emo_control_method==3), emo_text=emo_text,use_random=emo_random,
+                           verbose=cmd_args.verbose,
+                           max_text_tokens_per_segment=int(max_text_tokens_per_segment),
+                           **kwargs)
     return gr.update(value=output,visible=True)
 
 def update_prompt_audio():
@@ -720,7 +751,7 @@ with gr.Blocks(
                     label="",
                     key="input_text_single",
                     placeholder=i18n("请输入目标文本"),
-                    info=f"{i18n('当前模型版本')}{tts.model_version or '1.0'}",
+                    info=f"{i18n('当前模型版本')}{model_version}",
                     lines=5,
                 )
             with gr.Column(scale=1):
@@ -733,7 +764,7 @@ with gr.Blocks(
 
         with gr.Row():
             experimental_checkbox = gr.Checkbox(label=i18n("显示实验功能"), value=False)
-            glossary_checkbox = gr.Checkbox(label=i18n("开启术语词汇读音"), value=tts.normalizer.enable_glossary)
+            glossary_checkbox = gr.Checkbox(label=i18n("开启术语词汇读音"), value=glossary_enabled)
         with gr.Accordion(i18n("功能设置")):
             # 情感控制选项部分
             with gr.Row():
@@ -784,7 +815,7 @@ with gr.Blocks(
             emo_weight = gr.Slider(label=i18n("情感权重"), minimum=0.0, maximum=1.0, value=0.65, step=0.01)
 
         # 术语词汇表管理
-        with gr.Accordion(i18n("自定义术语词汇读音"), open=False, visible=tts.normalizer.enable_glossary) as glossary_accordion:
+        with gr.Accordion(i18n("自定义术语词汇读音"), open=False, visible=glossary_enabled) as glossary_accordion:
             gr.Markdown(i18n("自定义个别专业术语的读音"))
             with gr.Row():
                 with gr.Column(scale=1):
@@ -820,16 +851,16 @@ with gr.Blocks(
                     with gr.Row():
                         repetition_penalty = gr.Number(label="repetition_penalty", precision=None, value=10.0, minimum=0.1, maximum=20.0, step=0.1)
                         length_penalty = gr.Number(label="length_penalty", precision=None, value=0.0, minimum=-2.0, maximum=2.0, step=0.1)
-                    max_mel_tokens = gr.Slider(label="max_mel_tokens", value=1500, minimum=50, maximum=tts.cfg.gpt.max_mel_tokens, step=10, info=i18n("生成Token最大数量，过小导致音频被截断"), key="max_mel_tokens")
+                    max_mel_tokens = gr.Slider(label="max_mel_tokens", value=1500, minimum=50, maximum=max_mel_tokens_limit, step=10, info=i18n("生成Token最大数量，过小导致音频被截断"), key="max_mel_tokens")
                     # with gr.Row():
                     #     typical_sampling = gr.Checkbox(label="typical_sampling", value=False, info="不建议使用")
                     #     typical_mass = gr.Slider(label="typical_mass", value=0.9, minimum=0.0, maximum=1.0, step=0.1)
                 with gr.Column(scale=2):
                     gr.Markdown(f'**{i18n("分句设置")}** _{i18n("参数会影响音频质量和生成速度")}_')
                     with gr.Row():
-                        initial_value = max(20, min(tts.cfg.gpt.max_text_tokens, cmd_args.gui_seg_tokens))
+                        initial_value = max(20, min(max_text_tokens_limit, cmd_args.gui_seg_tokens))
                         max_text_tokens_per_segment = gr.Slider(
-                            label=i18n("分句最大Token数"), value=initial_value, minimum=20, maximum=tts.cfg.gpt.max_text_tokens, step=2, key="max_text_tokens_per_segment",
+                            label=i18n("分句最大Token数"), value=initial_value, minimum=20, maximum=max_text_tokens_limit, step=2, key="max_text_tokens_per_segment",
                             info=i18n("建议80~200之间，值越大，分句越长；值越小，分句越碎；过小过大都可能导致音频质量不高"),
                         )
                     with gr.Accordion(i18n("预览分句结果"), open=True) as segments_settings:
@@ -950,6 +981,7 @@ with gr.Blocks(
     )
 
     def on_input_text_change(text, max_text_tokens_per_segment):
+        tts = get_tts()
         if text and len(text) > 0:
             text_tokens_list = tts.tokenizer.tokenize(text)
 
@@ -971,6 +1003,7 @@ with gr.Blocks(
     # 术语词汇表事件处理函数
     def on_add_glossary_term(term, reading_zh, reading_en):
         """添加术语到词汇表并自动保存"""
+        tts = get_tts()
         term = term.rstrip()
         reading_zh = reading_zh.rstrip()
         reading_en = reading_en.rstrip()
@@ -1069,6 +1102,7 @@ with gr.Blocks(
 
     def on_glossary_checkbox_change(is_enabled):
         """控制术语词汇表的可见性"""
+        tts = get_tts()
         tts.normalizer.enable_glossary = is_enabled
         return gr.update(visible=is_enabled)
 
@@ -1102,6 +1136,7 @@ with gr.Blocks(
 
     def on_demo_load():
         """页面加载时重新加载glossary数据并刷新预设列表"""
+        tts = get_tts()
         try:
             tts.normalizer.load_glossary_from_yaml(tts.glossary_path)
         except Exception as e:
