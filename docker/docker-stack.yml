@@ -34,7 +34,7 @@ services:
         # ===== 主力优先逻辑 =====
         caddy.handle: "@premium"
         caddy.handle.1_reverse_proxy: "index-tts_api-1:8000 index-tts_api-2:8000 index-tts_api-3:8000"
-        caddy.handle.1_reverse_proxy.lb_policy: "weighted_round_robin 10000 10000 1 1"
+        caddy.handle.1_reverse_proxy.lb_policy: random
         caddy.handle.1_reverse_proxy.lb_try_duration: 5s
         caddy.handle.1_reverse_proxy.lb_try_interval: 250ms
         caddy.handle.1_reverse_proxy.health_uri: /health
