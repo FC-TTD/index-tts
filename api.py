@@ -61,27 +61,28 @@ if not os.path.exists(cmd_args.model_dir):
     sys.exit(1)
 
 # 全局模型实例
-tts = None
+tts_manager = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     应用程序生命周期管理
     """
-    global tts
+    global tts_manager
     
     # 创建输出目录
     os.makedirs("outputs", exist_ok=True)
     
     logger.info(
-        "正在初始化 IndexTTS2 模型... (fp16=%s, use_cuda_kernel=%s, device=%s, use_deepspeed=%s)",
+        "正在初始化 IndexTTS2 模型管理器... (fp16=%s, use_cuda_kernel=%s, device=%s, use_deepspeed=%s)",
         cmd_args.fp16,
         cmd_args.use_cuda_kernel,
         cmd_args.device,
         cmd_args.use_deepspeed,
     )
-    try:
-        tts = IndexTTS2(
+    
+    def loader():
+        return IndexTTS2(
             cfg_path=os.path.join(cmd_args.model_dir, "config.yaml"),
             model_dir=cmd_args.model_dir,
             use_fp16=bool(cmd_args.fp16),
@@ -91,11 +92,18 @@ async def lifespan(app: FastAPI):
             use_accel=bool(cmd_args.use_accel),
             use_torch_compile=bool(cmd_args.use_torch_compile)
         )
-        logger.info("IndexTTS2 模型初始化完成")
+
+    try:
+        from ttd_fastapi_utils import SmartModel
+        # Default 2h timeout
+        tts_manager = SmartModel(loader, timeout_seconds=7200)
+        logger.info("IndexTTS2 模型管理器初始化完成")
         yield
     finally:
-        logger.info("正在关闭 IndexTTS2 模型...")
-        tts = None
+        logger.info("正在关闭 IndexTTS2 模型管理器...")
+        if tts_manager:
+            tts_manager.stop()
+        tts_manager = None
 
 # 创建 FastAPI 应用
 app = FastAPI(
@@ -109,7 +117,7 @@ app = FastAPI(
 cuda_monitor = setup_cuda_health(
     app,
     path="/health",
-    ready_predicate=lambda: tts is not None,
+    ready_predicate=lambda: tts_manager is not None,
 )
 
 # 添加 CORS 中间件
@@ -145,6 +153,7 @@ async def generate_audio(
     max_mel_tokens: int = Form(1500),
     remove_silence: bool = Form(True),
     postprocess: bool = Form(True),
+    expected_duration: float | None = Form(None),
     # 自定义语速/语调
     speed: float = Form(1.0),
     pitch: float = Form(0.0),
@@ -172,7 +181,7 @@ async def generate_audio(
     返回：
         二进制 WAV 格式音频数据
     """
-    if tts is None:
+    if tts_manager is None:
         raise HTTPException(status_code=503, detail="模型未初始化")
     
     try:
@@ -220,29 +229,83 @@ async def generate_audio(
             # 设置输出路径
             output_path = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
 
-            # 执行推理（v2）
-            logger.info(f"开始生成语音（v2），文本长度: {len(text)}")
-            wav_path = tts.infer(
-                spk_audio_prompt=temp_path,
-                text=text,
-                output_path=output_path,
-                emo_audio_prompt=emo_temp_path,
-                emo_alpha=float(emo_alpha),
-                emo_vector=emo_vector_list,
-                use_emo_text=bool(use_emo_text),
-                emo_text=emo_text,
-                use_random=bool(use_random),
-                interval_silence=int(interval_silence),
-                duration_ratio=float(speed),
-                verbose=cmd_args.verbose,
-                max_text_tokens_per_segment=int(max_text_tokens_per_sentence),
-                **kwargs,
-            )
+            # 获取模型实例
+            tts = tts_manager.get()
 
-            logger.info(f"语音生成完成，保存到: {wav_path}")
+            _max_retries = 2
+            _tolerance = 0.05
+            _spd = float(speed)
+            _expected = None
+            try:
+                if expected_duration is not None:
+                    _expected = float(expected_duration)
+            except Exception:
+                _expected = None
 
-            # 读取生成的音频文件
-            wav, sr = sf.read(wav_path, dtype='float32')
+            wav = None
+            sr = None
+            for attempt in range(_max_retries + 1):
+                logger.info(
+                    "开始生成语音（v2），文本长度: %s, speed=%s, expected_duration=%s, attempt=%s/%s",
+                    len(text),
+                    _spd,
+                    _expected,
+                    attempt + 1,
+                    _max_retries + 1,
+                )
+
+                wav_path = tts.infer(
+                    spk_audio_prompt=temp_path,
+                    text=text,
+                    output_path=output_path,
+                    emo_audio_prompt=emo_temp_path,
+                    emo_alpha=float(emo_alpha),
+                    emo_vector=emo_vector_list,
+                    use_emo_text=bool(use_emo_text),
+                    emo_text=emo_text,
+                    use_random=bool(use_random),
+                    interval_silence=int(interval_silence),
+                    duration_ratio=float(_spd),
+                    verbose=cmd_args.verbose,
+                    max_text_tokens_per_segment=int(max_text_tokens_per_sentence),
+                    **kwargs,
+                )
+
+                logger.info(f"语音生成完成，保存到: {wav_path}")
+                wav, sr = sf.read(wav_path, dtype='float32')
+
+                if _expected is None or _expected <= 0:
+                    break
+
+                try:
+                    _balign_wav = trim_silence(wav, int(sr))
+                    _measured = float(len(_balign_wav)) / float(sr) if sr and len(_balign_wav) else 0.0
+                except Exception:
+                    logger.exception("expected_duration: 时长测量失败，已跳过自适应")
+                    break
+
+                if _measured <= 0:
+                    break
+
+                _rel_err = abs(_measured - _expected) / _expected
+                if _rel_err <= _tolerance or attempt >= _max_retries:
+                    break
+
+                _new_spd = _spd * (_measured / _expected)
+                if not (_new_spd > 0):
+                    break
+                logger.info(
+                    "expected_duration: measured=%.3fs expected=%.3fs rel_err=%.2f%%, update speed %.4f -> %.4f and retry",
+                    _measured,
+                    _expected,
+                    _rel_err * 100.0,
+                    _spd,
+                    _new_spd,
+                )
+                _spd = float(_new_spd)
+
+            if wav is None or sr is None:
+                raise HTTPException(status_code=500, detail="语音生成失败：未获得有效音频")
 
             # 静音切除
             if remove_silence:

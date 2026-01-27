@@ -26,7 +26,7 @@ def test_health(base_url):
         print(f"❌ 健康检查请求异常: {str(e)}")
         return False
 
-def test_generate_audio(base_url, text, output_file, prompt_speech, infer_mode="普通推理"):
+def test_generate_audio(base_url, text, output_file, prompt_speech, infer_mode="普通推理", speed=1.0, expected_duration=None):
     """测试语音生成端点"""
     url = f"{base_url}/generate"
     print(f"测试语音生成端点: {url}")
@@ -38,6 +38,7 @@ def test_generate_audio(base_url, text, output_file, prompt_speech, infer_mode="
         "text": text,
         "infer_mode": infer_mode,
         "postprocess": "true",
+        "speed": str(speed),
         "max_text_tokens_per_sentence": "120",
         "sentences_bucket_max_size": "4",
         "do_sample": "true",
@@ -49,6 +50,9 @@ def test_generate_audio(base_url, text, output_file, prompt_speech, infer_mode="
         "repetition_penalty": "10.0",
         "max_mel_tokens": "600"
     }
+
+    if expected_duration is not None:
+        data["expected_duration"] = str(expected_duration)
     
     files = {}
     if prompt_speech and os.path.exists(prompt_speech):
@@ -103,6 +107,8 @@ def main():
     parser.add_argument("--text", default="你怎么这么傻,昨夜明明说好了你绝不会轻举妄动的", help="要合成的文本")
     parser.add_argument("--output", default="output.wav", help="输出音频文件路径")
     parser.add_argument("--prompt-speech", help="提示语音文件路径")
+    parser.add_argument("--speed", type=float, default=1.0, help="语速控制参数 (duration_ratio)")
+    parser.add_argument("--expected-duration", type=float, default=None, help="期望时长（秒），用于自适应重推理")
     parser.add_argument("--infer-mode", default="普通推理", choices=["普通推理", "批次推理"], help="推理模式")
     
     args = parser.parse_args()
@@ -127,13 +133,17 @@ def main():
         return
     
     # 测试语音生成
-    test_generate_audio(
+    ok = test_generate_audio(
         args.url, 
         args.text, 
         args.output,
         prompt_speech=args.prompt_speech,
-        infer_mode=args.infer_mode
+        infer_mode=args.infer_mode,
+        speed=args.speed,
+        expected_duration=args.expected_duration
     )
+    if not ok:
+        return
 
 if __name__ == "__main__":
     main()
