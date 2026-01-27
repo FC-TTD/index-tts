@@ -153,8 +153,8 @@ async def generate_audio(
     max_mel_tokens: int = Form(1500),
     remove_silence: bool = Form(True),
     postprocess: bool = Form(True),
-    expected_duration: float | None = Form(None),
     # 自定义语速/语调
+    expected_duration: float | None = Form(None),
     speed: float = Form(1.0),
     pitch: float = Form(0.0),
 ):

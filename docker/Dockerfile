@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/var/cache/apt,id=apt-cache,sharing=locked \
       curl \
       pkg-config \
       libsndfile1 \
-      ffmpeg \
+      ffmpeg sox\
       libasound2-dev \
     && rm -rf /var/lib/apt/lists/*
 
