@@ -2,12 +2,13 @@
 
 TTD FastAPI Utils: a small utility collection for FastAPI services.
 
-Includes four modules:
+Includes five modules:
 
 - `cuda_health`: Global CUDA-aware health check (Plan B) that tracks recent failures.
 - `home_probe`: Default home probe payload (app/build/container info) for reverse proxies.
 - `ttd_notify`: A simple notifier helper (default webhook URL can be overridden via env).
 - `postprocess`: Audio post-processing helpers, including LUFS-based loudness normalization with short-audio padding and a simple EQ.
+- `speed_control`: Pitch-preserving time-stretch helpers via external tools (SoX/FFmpeg).
 
 ## Install (monorepo)
 
@@ -132,6 +133,14 @@ Environment variables:
   - `min_segment_ms`: Minimum length of non-silent segment to keep (default 50ms).
   - `ignore_trailing_gap_ms`: If last segment is far from previous (gap > this) and short, drop it (default 300ms).
   - `fade_ms`: Fade in/out duration (default 10ms).
+
+### Speed Control
+
+- `time_stretch_wav(wav, sr, speed, allow_passthrough_on_failure=True)`
+  - Pitch-preserving time-stretch via SoX (`sox tempo -s`).
+  - Requires SoX to be installed on the system.
+  - Set environment variable `TTD_SPEED_CONTROL_BYPASS_SOX` to any non-empty value to bypass SoX and passthrough the original audio.
+- `apply_speed_to_wav_list(wavs, sr, speed, allow_passthrough_on_failure=True)`
 
 ## Changelog
 

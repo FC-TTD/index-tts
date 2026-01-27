@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 (2026-01-27)
+
+- speed_control
+  - Add `time_stretch_wav` and `apply_speed_to_wav_list` for pitch-preserving time-stretch via SoX (`sox tempo -s`).
+  - SoX is required by default; if not found, a `FileNotFoundError` is raised.
+  - Set environment variable `TTD_SPEED_CONTROL_BYPASS_SOX` to bypass SoX and passthrough the original audio.
+
 ## 0.2.4 (2026-01-24)
 
 - SmartModel: New model lifecycle management wrapper
