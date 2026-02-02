@@ -278,7 +278,7 @@ async def generate_audio(
                     break
 
                 try:
-                    _balign_wav = trim_silence(wav, int(sr))
+                    _balign_wav = trim_silence(wav, int(sr), min_silence_duration_ms=0)
                     _measured = float(len(_balign_wav)) / float(sr) if sr and len(_balign_wav) else 0.0
                 except Exception:
                     logger.exception("expected_duration: 时长测量失败，已跳过自适应")
