@@ -8,6 +8,7 @@ Includes five modules:
 - `home_probe`: Default home probe payload (app/build/container info) for reverse proxies.
 - `ttd_notify`: A simple notifier helper (default webhook URL can be overridden via env).
 - `postprocess`: Audio post-processing helpers, including LUFS-based loudness normalization with short-audio padding and a simple EQ.
+- `preset`: Ready-to-use audio style presets built on top of `postprocess`.
 - `speed_control`: Pitch-preserving time-stretch helpers via external tools (SoX/FFmpeg).
 
 ## Install (monorepo)
@@ -30,7 +31,7 @@ pip install dist/ttd_fastapi_utils-*.whl
 
 ```python
 from fastapi import FastAPI
-from ttd_fastapi_utils import setup_cuda_health, apply_postprocess
+from ttd_fastapi_utils import postprocess, setup_cuda_health
 
 app = FastAPI()
 
@@ -55,7 +56,13 @@ import soundfile as sf
 @app.post("/generate")
 async def generate():
     wav, sr = sf.read("/path/to.wav", dtype="float32")
-    wav = apply_postprocess(wav, sr, target_loudness=-23.0, enable=True, trim_silence=False)
+    wav = postprocess.apply_postprocess(
+        wav,
+        sr,
+        target_loudness=-23.0,
+        enable=True,
+        trim_silence=False,
+    )
     return {"ok": True}
 ```
 
@@ -114,6 +121,15 @@ Environment variables:
 
 ### Postprocess
 
+Recommended import style:
+
+```python
+from ttd_fastapi_utils import postprocess
+
+wav = postprocess.delay(wav, sr, delay_ms=80.0, decay=0.35, repeats=2)
+wav = postprocess.bandpass(wav, sr, low_cut_hz=300.0, high_cut_hz=3400.0)
+```
+
 - `loudnorm(wav, sr, target_loudness=-23, threshold=0.99, block_sec=0.4)`
   - Pads short audio to `block_sec` for LUFS calculation, then applies gain to original length
   - Falls back to peak limiting when LUFS fails
@@ -121,10 +137,24 @@ Environment variables:
 - `limiter(data, threshold=0.99)`
   - A simple peak limiter that scales samples above `threshold` down to `threshold` (element-wise)
   - Used by `loudnorm(...)` internally via its `threshold` parameter
+- `butter_filter(audio, sr, btype=..., cutoff=..., order=4)`
+  - 通用 Butterworth 滤波原语，适合业务层自行封装 preset
+- `lowpass(wav, sr, cutoff_hz, order=4)`
+- `highpass(wav, sr, cutoff_hz, order=4)`
+- `bandpass(wav, sr, low_cut_hz, high_cut_hz, order=4)`
+  - 基础滤波积木，适合组合电话、广播、朦胧、回忆等效果
+- `delay(wav, sr, delay_ms, decay, repeats)`
+  - 多次衰减延迟；返回叠加后的 wet signal
+- `reverb(wav, sr, room_size=0.45, damping=0.35, pre_delay_ms=18.0)`
+  - 轻量 Schroeder 风格混响原语，适合业务层自己叠加房间感、尾音和空间感
+- `saturate(wav, drive=1.3)`
+  - 基于 `tanh` 的软削波/饱和
+- `mix(dry, wet, wet_ratio=0.5)`
+  - 干湿混合，`wet_ratio` 越大效果越重
 - `eq(wav, sr)`
   - Simple high-band enhancement with safe Butterworth band-pass
-- `apply_postprocess(wav, sr, target_loudness=-23.0, enable=True, trim_silence=False)`
-  - Convenience wrapper with exception safety (optional `trim_silence` + `loudnorm(target_loudness=...)` + `eq`, so limiter is applied via `loudnorm`)
+- `apply_postprocess(wav, sr, target_loudness=-23.0, enable=True, trim_silence=False, enable_eq=True)`
+  - Convenience wrapper with exception safety (optional `trim_silence` + `loudnorm(target_loudness=...)` + optional `eq`)
 - `trim_silence(wav, sr, threshold_db=-40.0, min_silence_duration_ms=200, min_segment_ms=50, ignore_trailing_gap_ms=300, fade_ms=10)`
   - Trims leading and trailing silence using librosa.effects.split.
   - Multi-channel: supports both `(T, C)` and `(C, T)` shapes (heuristic)
@@ -133,6 +163,55 @@ Environment variables:
   - `min_segment_ms`: Minimum length of non-silent segment to keep (default 50ms).
   - `ignore_trailing_gap_ms`: If last segment is far from previous (gap > this) and short, drop it (default 300ms).
   - `fade_ms`: Fade in/out duration (default 10ms).
+
+Example composition in business layer:
+
+```python
+from ttd_fastapi_utils import postprocess
+
+filtered = postprocess.bandpass(wav, sr, low_cut_hz=300.0, high_cut_hz=3400.0)
+colored = postprocess.saturate(filtered, drive=1.5)
+echo = postprocess.delay(colored, sr, delay_ms=80.0, decay=0.35, repeats=2)
+room = postprocess.reverb(colored, sr, room_size=0.35, damping=0.45, pre_delay_ms=16.0)
+wet = postprocess.mix(echo, room, wet_ratio=0.4)
+wav_out = postprocess.limiter(postprocess.mix(colored, wet, wet_ratio=0.25), threshold=0.98)
+```
+
+### Preset
+
+Recommended import style:
+
+```python
+from ttd_fastapi_utils import preset
+
+wav = preset.apply_preset("telephone", wav, sr)
+wav2 = preset.inner_monologue(wav, sr, delay_ms=95.0, wet_ratio=0.35)
+```
+
+- `list_presets()`
+  - 当前内置：`telephone`、`smart_assistant`、`inner_monologue`、`radio`、`intercom`
+- `apply_preset(name, wav, sr, **kwargs)`
+  - 按名称应用 preset，支持中英文别名，例如 `电话`、`智能语音`、`心声`
+- `telephone(wav, sr, ...)`
+  - 电话音：窄带 + 轻饱和
+- `smart_assistant(wav, sr, ...)`
+  - 模拟智能语音：更干净、清晰、略带数字感，并带一点受控空间感
+- `inner_monologue(wav, sr, ...)`
+  - 心声独白：柔和低通 + 短回声 + 轻混响
+- `radio(wav, sr, ...)`
+  - 收音机/广播：更强中频和一点箱体空间感
+- `intercom(wav, sr, ...)`
+  - 对讲机：更窄、更硬的中频质感
+
+Debug app:
+
+```bash
+uv run python packages/ttd_fastapi_utils/examples/postprocess_debug_app.py --host 0.0.0.0 --port 7861
+```
+
+- 上传音频后，可切换 `preset` / `custom` 两种模式
+- `preset` 模式下可直接试听电话音、模拟智能语音、心声独白、广播、对讲机
+- `custom` 模式下可手动调 `标准链 / 滤波 / 饱和 / 延迟 / 混响 / 限幅`
 
 ### Speed Control
 

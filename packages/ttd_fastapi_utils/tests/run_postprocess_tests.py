@@ -16,7 +16,19 @@ _SRC_DIR = os.path.abspath(os.path.join(_THIS_DIR, "..", "src"))
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 
-from ttd_fastapi_utils.postprocess import loudnorm, eq, apply_postprocess
+from ttd_fastapi_utils.postprocess import (
+    apply_postprocess,
+    bandpass,
+    delay,
+    eq,
+    highpass,
+    lowpass,
+    loudnorm,
+    mix,
+    reverb,
+    saturate,
+)
+from ttd_fastapi_utils import preset
 
 
 def gen_sine(sr: int, freq: float, seconds: float, amp: float = 0.5, dtype=np.float32):
@@ -82,12 +94,94 @@ def test_eq_runs_and_limits():
         raise AssertionError("eq peak limit exceeded")
 
 
+def test_basic_filters_run_and_preserve_shape():
+    sr = 24000
+    x = gen_sine(sr=sr, freq=600.0, seconds=0.5, amp=0.5)
+    y_lp = lowpass(x, sr, cutoff_hz=2000.0)
+    y_hp = highpass(x, sr, cutoff_hz=200.0)
+    y_bp = bandpass(x, sr, low_cut_hz=250.0, high_cut_hz=3000.0)
+    for name, y in [("lowpass", y_lp), ("highpass", y_hp), ("bandpass", y_bp)]:
+        if not isinstance(y, np.ndarray) or y.shape != x.shape:
+            raise AssertionError(f"{name} output invalid")
+
+
+def test_saturate_runs_and_limits():
+    sr = 24000
+    x = gen_sine(sr=sr, freq=900.0, seconds=0.5, amp=0.5)
+    y = saturate(x, drive=1.8)
+    if not isinstance(y, np.ndarray) or y.shape != x.shape:
+        raise AssertionError("saturate output invalid")
+    if np.max(np.abs(y)) > 1.0 + 1e-6:
+        raise AssertionError("saturate peak limit exceeded")
+
+
+def test_delay_and_mix_run():
+    sr = 22050
+    x = gen_sine(sr=sr, freq=700.0, seconds=0.35, amp=0.5)
+    delayed = delay(x, sr, delay_ms=60.0, decay=0.35, repeats=2)
+    y = mix(x, delayed, wet_ratio=0.4)
+    if not isinstance(y, np.ndarray) or y.shape != x.shape:
+        raise AssertionError("delay/mix output invalid")
+
+
+def test_reverb_runs_and_preserve_shape():
+    sr = 24000
+    x = gen_sine(sr=sr, freq=520.0, seconds=0.45, amp=0.5)
+    y = reverb(x, sr, room_size=0.45, damping=0.35, pre_delay_ms=18.0)
+    if not isinstance(y, np.ndarray) or y.shape != x.shape:
+        raise AssertionError("reverb output invalid")
+    if not np.isfinite(y).all():
+        raise AssertionError("reverb output contains non-finite values")
+
+
+def test_mix_shape_mismatch_raises():
+    x = np.zeros(16, dtype=np.float32)
+    y = np.zeros(15, dtype=np.float32)
+    try:
+        mix(x, y, wet_ratio=0.5)
+    except ValueError:
+        return
+    raise AssertionError("mix should raise on shape mismatch")
+
+
+def test_preset_list_and_apply():
+    names = tuple(preset.list_presets())
+    expected = ("telephone", "smart_assistant", "inner_monologue", "radio", "intercom")
+    if names != expected:
+        raise AssertionError("preset list mismatch")
+
+    sr = 24000
+    x = gen_sine(sr=sr, freq=750.0, seconds=0.45, amp=0.5)
+    for name in expected:
+        y = preset.apply_preset(name, x, sr)
+        if not isinstance(y, np.ndarray) or y.shape != x.shape:
+            raise AssertionError("preset %s output invalid" % name)
+        if np.max(np.abs(y)) > 1.0 + 1e-6:
+            raise AssertionError("preset %s peak limit exceeded" % name)
+
+
+def test_preset_aliases_work():
+    sr = 22050
+    x = gen_sine(sr=sr, freq=680.0, seconds=0.4, amp=0.5)
+    y_phone = preset.apply_preset("电话", x, sr)
+    y_inner = preset.apply_preset("心声", x, sr)
+    if y_phone.shape != x.shape or y_inner.shape != x.shape:
+        raise AssertionError("preset alias output invalid")
+
+
 def main():
     tests = [
         test_loudnorm_short_audio_padding_no_exception,
         test_loudnorm_multichannel_first_channel_only_consistency,
         test_apply_postprocess_wraps_and_safe,
         test_eq_runs_and_limits,
+        test_basic_filters_run_and_preserve_shape,
+        test_saturate_runs_and_limits,
+        test_delay_and_mix_run,
+        test_reverb_runs_and_preserve_shape,
+        test_mix_shape_mismatch_raises,
+        test_preset_list_and_apply,
+        test_preset_aliases_work,
     ]
     for t in tests:
         t()
