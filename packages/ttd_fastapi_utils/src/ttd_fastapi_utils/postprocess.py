@@ -2,10 +2,227 @@ import logging
 import numpy as np
 import pyloudnorm as pyln
 import scipy.signal as signal
-from typing import Tuple
+from typing import Tuple, Union
 
 logger = logging.getLogger(__name__)
 _LIBROSA_IMPORT_WARNED = False
+
+
+def _ensure_float_audio(wav_data: np.ndarray) -> np.ndarray:
+    if isinstance(wav_data, list):
+        wav_data = np.asarray(wav_data, dtype=np.float32)
+    elif not isinstance(wav_data, np.ndarray):
+        wav_data = np.asarray(wav_data)
+    if not np.issubdtype(wav_data.dtype, np.floating):
+        wav_data = wav_data.astype(np.float32)
+    return wav_data
+
+
+def butter_filter(
+    audio: np.ndarray,
+    sr: int,
+    *,
+    btype: str,
+    cutoff: Union[float, Tuple[float, float]],
+    order: int = 4,
+) -> np.ndarray:
+    nyquist = 0.5 * sr
+    if nyquist <= 0:
+        return audio
+
+    if isinstance(cutoff, tuple):
+        low_hz, high_hz = cutoff
+        low = max(low_hz / nyquist, 1e-6)
+        high = min(high_hz / nyquist, 0.99)
+        if low >= high:
+            return audio
+        wn = (low, high)
+    else:
+        wn = max(min(cutoff / nyquist, 0.99), 1e-6)
+
+    try:
+        b, a = signal.butter(order, wn, btype=btype)
+        return signal.filtfilt(b, a, audio)
+    except Exception:
+        logger.exception("后处理: %s 滤波失败，已回退为原始音频", btype)
+        return audio
+
+
+def lowpass(
+    wav_data: np.ndarray,
+    sr: int,
+    cutoff_hz: float,
+    order: int = 4,
+) -> np.ndarray:
+    """低通滤波。"""
+    base_audio = _ensure_float_audio(wav_data)
+    orig_dtype = base_audio.dtype
+    audio = base_audio.astype(np.float64, copy=False)
+    filtered = butter_filter(audio, sr, btype="lowpass", cutoff=float(cutoff_hz), order=order)
+    return filtered.astype(orig_dtype, copy=False)
+
+
+def highpass(
+    wav_data: np.ndarray,
+    sr: int,
+    cutoff_hz: float,
+    order: int = 4,
+) -> np.ndarray:
+    """高通滤波。"""
+    base_audio = _ensure_float_audio(wav_data)
+    orig_dtype = base_audio.dtype
+    audio = base_audio.astype(np.float64, copy=False)
+    filtered = butter_filter(audio, sr, btype="highpass", cutoff=float(cutoff_hz), order=order)
+    return filtered.astype(orig_dtype, copy=False)
+
+
+def bandpass(
+    wav_data: np.ndarray,
+    sr: int,
+    low_cut_hz: float,
+    high_cut_hz: float,
+    order: int = 4,
+) -> np.ndarray:
+    """带通滤波。"""
+    base_audio = _ensure_float_audio(wav_data)
+    orig_dtype = base_audio.dtype
+    audio = base_audio.astype(np.float64, copy=False)
+    filtered = butter_filter(
+        audio,
+        sr,
+        btype="bandpass",
+        cutoff=(float(low_cut_hz), float(high_cut_hz)),
+        order=order,
+    )
+    return filtered.astype(orig_dtype, copy=False)
+
+
+def delay(
+    wav_data: np.ndarray,
+    sr: int,
+    *,
+    delay_ms: float,
+    decay: float,
+    repeats: int,
+) -> np.ndarray:
+    """多次衰减延迟，不混入 dry signal，仅返回叠加后的结果。"""
+    base_audio = _ensure_float_audio(wav_data)
+    orig_dtype = base_audio.dtype
+    audio = base_audio.astype(np.float64, copy=False)
+    delay_samples = max(int(sr * delay_ms / 1000.0), 1)
+    repeats = max(int(repeats), 0)
+    if repeats == 0 or decay == 0.0:
+        return audio.astype(orig_dtype, copy=True)
+
+    out = audio.astype(np.float64, copy=True)
+    for i in range(1, repeats + 1):
+        gain = decay ** i
+        start = delay_samples * i
+        if start >= len(audio):
+            break
+        out[start:] += gain * audio[:-start]
+    return out.astype(orig_dtype, copy=False)
+
+
+def saturate(
+    wav_data: np.ndarray,
+    drive: float = 1.3,
+) -> np.ndarray:
+    """基于 tanh 的软削波/饱和。"""
+    base_audio = _ensure_float_audio(wav_data)
+    orig_dtype = base_audio.dtype
+    audio = base_audio.astype(np.float64, copy=False)
+    drive = max(float(drive), 1e-6)
+    saturated = np.tanh(audio * drive) / np.tanh(drive)
+    return saturated.astype(orig_dtype, copy=False)
+
+
+def mix(
+    dry: np.ndarray,
+    wet: np.ndarray,
+    wet_ratio: float = 0.5,
+) -> np.ndarray:
+    """干湿混合。"""
+    dry_audio = _ensure_float_audio(dry)
+    wet_audio = _ensure_float_audio(wet)
+    wet_ratio = float(np.clip(wet_ratio, 0.0, 1.0))
+    if dry_audio.shape != wet_audio.shape:
+        raise ValueError("dry and wet audio must have the same shape")
+    mixed = (1.0 - wet_ratio) * dry_audio + wet_ratio * wet_audio
+    return mixed.astype(dry_audio.dtype, copy=False)
+
+
+def _apply_channelwise(
+    wav_data: np.ndarray,
+    processor,
+) -> np.ndarray:
+    if wav_data.ndim == 1:
+        return processor(wav_data)
+    if wav_data.ndim != 2:
+        raise ValueError("audio must be 1D or 2D")
+
+    if wav_data.shape[0] < wav_data.shape[1]:
+        channels = [processor(wav_data[idx, :]) for idx in range(wav_data.shape[0])]
+        return np.stack(channels, axis=0)
+
+    channels = [processor(wav_data[:, idx]) for idx in range(wav_data.shape[1])]
+    return np.stack(channels, axis=1)
+
+
+def reverb(
+    wav_data: np.ndarray,
+    sr: int,
+    *,
+    room_size: float = 0.45,
+    damping: float = 0.35,
+    pre_delay_ms: float = 18.0,
+) -> np.ndarray:
+    """轻量 Schroeder 风格混响，返回带残响的 wet signal。"""
+    base_audio = _ensure_float_audio(wav_data)
+    orig_dtype = base_audio.dtype
+    audio = base_audio.astype(np.float64, copy=False)
+
+    room_size = float(np.clip(room_size, 0.0, 1.0))
+    damping = float(np.clip(damping, 0.0, 1.0))
+    pre_delay_samples = max(int(sr * max(pre_delay_ms, 0.0) / 1000.0), 0)
+    if sr <= 0:
+        return base_audio.astype(orig_dtype, copy=True)
+
+    delay_ms = np.array([29.7, 37.1, 41.1, 43.7], dtype=np.float64)
+    gain_base = np.array([0.805, 0.773, 0.753, 0.733], dtype=np.float64)
+    scaled_delay_samples = np.maximum(
+        (delay_ms * (0.72 + 0.65 * room_size) * sr / 1000.0).astype(int),
+        1,
+    )
+    gains = gain_base * (0.52 + 0.36 * room_size)
+    tail_seconds = 0.22 + 1.9 * room_size
+    ir_len = pre_delay_samples + int(sr * tail_seconds) + 1
+    impulse = np.zeros(ir_len, dtype=np.float64)
+    impulse[0] = 1.0
+
+    feedback_damping = 1.0 - 0.22 - 0.55 * damping
+    feedback_damping = float(np.clip(feedback_damping, 0.15, 0.95))
+
+    for delay_samples, base_gain in zip(scaled_delay_samples, gains):
+        tap = pre_delay_samples + delay_samples
+        gain = float(base_gain)
+        while tap < ir_len and gain > 1e-4:
+            impulse[tap] += gain
+            tap += delay_samples
+            gain *= base_gain * feedback_damping
+
+    impulse /= max(np.max(np.abs(impulse)), 1.0)
+
+    def _process_channel(channel: np.ndarray) -> np.ndarray:
+        wet = signal.fftconvolve(channel, impulse, mode="full")[: len(channel)]
+        if damping > 0.0:
+            nyquist = 0.5 * sr
+            cutoff_hz = max(400.0, min(nyquist * (0.92 - 0.68 * damping), nyquist * 0.99))
+            wet = butter_filter(wet, sr, btype="lowpass", cutoff=cutoff_hz, order=2)
+        return wet.astype(orig_dtype, copy=False)
+
+    reverbed = _apply_channelwise(audio, _process_channel)
+    return reverbed.astype(orig_dtype, copy=False)
 
 
 def limiter(data: np.ndarray, threshold: float = 0.99) -> np.ndarray:
@@ -107,26 +324,18 @@ def eq(wav_data: np.ndarray, sr: int) -> np.ndarray:
     """
     Simple EQ: enhance a high-frequency band while ensuring stability across sample rates.
     """
-    def enhance_frequency_band(audio, sample_rate, low_freq, high_freq, gain_factor):
-        nyquist = 0.5 * sample_rate
-        low = low_freq / nyquist
-        high = min(high_freq / nyquist, 0.99)
-        if low >= high or low <= 0 or high >= 1:
-            return audio
-        b, a = signal.butter(4, [low, high], btype="bandpass")
-        filtered_audio = signal.filtfilt(b, a, audio)
-        enhanced_audio = audio + gain_factor * filtered_audio
-        return enhanced_audio
-
     nyquist = 0.5 * sr
     low_freq = min(5000, nyquist * 0.6)
     high_freq = min(10000, nyquist * 0.95)
     gain_factor = 0.2
 
-    audio = wav_data.astype(np.float64)
-    enhanced_audio = enhance_frequency_band(audio, sr, low_freq, high_freq, gain_factor)
+    base_audio = _ensure_float_audio(wav_data)
+    orig_dtype = base_audio.dtype
+    audio = base_audio.astype(np.float64, copy=False)
+    enhanced_band = bandpass(audio, sr, low_freq, high_freq, order=4).astype(np.float64, copy=False)
+    enhanced_audio = audio + gain_factor * enhanced_band
     enhanced_audio = np.clip(enhanced_audio, -1.0, 1.0)
-    return enhanced_audio
+    return enhanced_audio.astype(orig_dtype, copy=False)
 
 
 def trim_silence(
@@ -231,15 +440,23 @@ def trim_silence(
         return wav_data
 
 
-def apply_postprocess(wav: np.ndarray, sr: int, target_loudness: float = -23.0, enable: bool = True, trim_silence: bool = False) -> np.ndarray:
-    """Apply loudnorm + eq with exception safety."""
+def apply_postprocess(
+    wav: np.ndarray,
+    sr: int,
+    target_loudness: float = -23.0,
+    enable: bool = True,
+    trim_silence: bool = False,
+    enable_eq: bool = True,
+) -> np.ndarray:
+    """Apply optional trim + loudnorm + eq with exception safety."""
     if not enable:
         return wav
     try:
         if trim_silence:
-            wav = trim_silence(wav, sr)
+            wav = globals()["trim_silence"](wav, sr)
         wav_p, _ = loudnorm(wav, sr, target_loudness=target_loudness)
-        wav_p = eq(wav_p, sr)
+        if enable_eq:
+            wav_p = eq(wav_p, sr)
         return wav_p
     except Exception:
         logger.exception("后处理阶段失败，已跳过后处理并返回原始生成音频")
