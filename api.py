@@ -153,6 +153,7 @@ async def generate_audio(
     max_mel_tokens: int = Form(1500),
     remove_silence: bool = Form(True),
     postprocess: bool = Form(True),
+    lufs: float = Form(-23.0),
     # 自定义语速/语调
     expected_duration: float | None = Form(None),
     speed: float = Form(1.0),
@@ -177,6 +178,7 @@ async def generate_audio(
         do_sample/top_p/top_k/temperature/length_penalty/num_beams/repetition_penalty/max_mel_tokens: 采样与长度控制参数
         remove_silence: 是否自动切除首尾静音（默认 True）
         postprocess: 是否进行响度归一化和EQ后处理（默认 True）
+        lufs: 后处理目标响度（默认 -23 LUFS）
 
     返回：
         二进制 WAV 格式音频数据
@@ -322,7 +324,7 @@ async def generate_audio(
                 logger.exception("音高移调失败，已跳过移调")
 
             if postprocess:
-                wav = apply_postprocess(wav, sr, enable=True)
+                wav = apply_postprocess(wav, sr, target_loudness=float(lufs), enable=True)
 
             # 将音频数据转换为 WAV 格式的二进制数据
             buffer = BytesIO()
