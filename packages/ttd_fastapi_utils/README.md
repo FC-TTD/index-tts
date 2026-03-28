@@ -177,6 +177,41 @@ wet = postprocess.mix(echo, room, wet_ratio=0.4)
 wav_out = postprocess.limiter(postprocess.mix(colored, wet, wet_ratio=0.25), threshold=0.98)
 ```
 
+Recommended separation:
+
+```python
+from ttd_fastapi_utils import postprocess, preset
+
+# 1) Standard postprocess for cleanup / consistency
+wav = postprocess.apply_postprocess(
+    wav,
+    sr,
+    target_loudness=-23.0,
+    enable=True,
+    trim_silence=False,
+    enable_eq=True,
+)
+
+# 2) Style preset for character / sound design
+wav = preset.smart_assistant(wav, sr)
+```
+
+Implementation guidance:
+
+- 不要把 `Standard Postprocess` 和 `Style Preset` 混成一条隐式链路。
+- `Standard Postprocess` 更适合给 TTS / ASR / 语音生成结果做统一扫尾，例如：
+  - `trim_silence`
+  - `loudnorm`
+  - `eq`
+- `Style Preset` 应该视为独立的音色设计步骤，按需单独 `apply`：
+  - 电话音 / 智能助手 / 心声 / 广播 / 对讲机
+- 推荐业务侧显式串联，而不是让 preset 内部偷偷带标准链：
+
+```python
+wav = postprocess.apply_postprocess(wav, sr, ...)
+wav = preset.apply_preset("smart_assistant", wav, sr)
+```
+
 ### Preset
 
 Recommended import style:
@@ -196,6 +231,7 @@ wav2 = preset.inner_monologue(wav, sr, delay_ms=95.0, wet_ratio=0.35)
   - 电话音：窄带 + 轻饱和
 - `smart_assistant(wav, sr, ...)`
   - 模拟智能语音：更干净、清晰、略带数字感，并带一点受控空间感
+  - 建议业务侧先跑 `postprocess.apply_postprocess(...)`，再叠加该 preset
 - `inner_monologue(wav, sr, ...)`
   - 心声独白：柔和低通 + 短回声 + 轻混响
 - `radio(wav, sr, ...)`
@@ -212,6 +248,7 @@ uv run python packages/ttd_fastapi_utils/examples/postprocess_debug_app.py --hos
 - 上传音频后，可切换 `preset` / `custom` 两种模式
 - `preset` 模式下可直接试听电话音、模拟智能语音、心声独白、广播、对讲机
 - `custom` 模式下可手动调 `标准链 / 滤波 / 饱和 / 延迟 / 混响 / 限幅`
+- `preset` 模式下，`Standard Postprocess` 与 `Style Preset` 现在是两套独立流程
 
 ### Speed Control
 

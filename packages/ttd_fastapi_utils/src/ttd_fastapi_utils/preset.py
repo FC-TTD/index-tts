@@ -15,27 +15,6 @@ def _ensure_float_audio(wav_data: np.ndarray) -> np.ndarray:
     return wav_data
 
 
-def _apply_standard_chain(
-    wav_data: np.ndarray,
-    sr: int,
-    *,
-    use_standard_chain: bool,
-    target_loudness: float,
-    trim_silence: bool,
-    enable_eq: bool,
-) -> np.ndarray:
-    if not use_standard_chain:
-        return wav_data
-    return postprocess.apply_postprocess(
-        wav_data,
-        sr,
-        target_loudness=target_loudness,
-        enable=True,
-        trim_silence=trim_silence,
-        enable_eq=enable_eq,
-    )
-
-
 def _apply_reverb(
     wav_data: np.ndarray,
     sr: int,
@@ -60,10 +39,6 @@ def _apply_reverb(
 def telephone(
     wav_data: np.ndarray,
     sr: int,
-    use_standard_chain: bool = False,
-    target_loudness: float = -23.0,
-    trim_silence: bool = False,
-    enable_eq: bool = True,
     enable_saturate: bool = True,
     enable_reverb: bool = False,
     enable_limiter: bool = True,
@@ -79,14 +54,7 @@ def telephone(
 ) -> np.ndarray:
     """电话音：窄带 + 轻饱和。"""
     audio = _ensure_float_audio(wav_data)
-    out = _apply_standard_chain(
-        audio,
-        sr,
-        use_standard_chain=use_standard_chain,
-        target_loudness=target_loudness,
-        trim_silence=trim_silence,
-        enable_eq=enable_eq,
-    )
+    out = audio
     filtered = postprocess.bandpass(out, sr, low_cut_hz=low_cut_hz, high_cut_hz=high_cut_hz)
     colored = filtered
     if enable_saturate:
@@ -109,10 +77,6 @@ def telephone(
 def smart_assistant(
     wav_data: np.ndarray,
     sr: int,
-    use_standard_chain: bool = True,
-    target_loudness: float = -23.0,
-    trim_silence: bool = False,
-    enable_eq: bool = True,
     enable_saturate: bool = True,
     enable_delay: bool = True,
     enable_reverb: bool = False,
@@ -121,7 +85,7 @@ def smart_assistant(
     high_cut_hz: float = 4250.0,
     drive: float = 1.45,
     saturate_wet: float = 0.06,
-    wet_ratio: float = 1.0,
+    wet_ratio: float = 0.95,
     delay_ms: float = 41.0,
     decay: float = 0.53,
     repeats: int = 2,
@@ -132,16 +96,9 @@ def smart_assistant(
     reverb_wet: float = 0.0,
     limiter_threshold: float = 0.98,
 ) -> np.ndarray:
-    """模拟智能语音：基于最终试听结果固化的标准链 + 带通 + 轻饱和 + 空间尾音。"""
+    """模拟智能语音：带通 + 轻饱和 + 空间尾音。"""
     audio = _ensure_float_audio(wav_data)
-    base = _apply_standard_chain(
-        audio,
-        sr,
-        use_standard_chain=use_standard_chain,
-        target_loudness=target_loudness,
-        trim_silence=trim_silence,
-        enable_eq=enable_eq,
-    )
+    base = audio
 
     out = postprocess.bandpass(base, sr, low_cut_hz=low_cut_hz, high_cut_hz=high_cut_hz)
 
@@ -171,10 +128,6 @@ def smart_assistant(
 def inner_monologue(
     wav_data: np.ndarray,
     sr: int,
-    use_standard_chain: bool = False,
-    target_loudness: float = -23.0,
-    trim_silence: bool = False,
-    enable_eq: bool = False,
     enable_delay: bool = True,
     enable_reverb: bool = True,
     enable_limiter: bool = True,
@@ -191,14 +144,7 @@ def inner_monologue(
 ) -> np.ndarray:
     """心声独白：柔和低通 + 短回声，带一点空气感。"""
     audio = _ensure_float_audio(wav_data)
-    out = _apply_standard_chain(
-        audio,
-        sr,
-        use_standard_chain=use_standard_chain,
-        target_loudness=target_loudness,
-        trim_silence=trim_silence,
-        enable_eq=enable_eq,
-    )
+    out = audio
     softened = postprocess.lowpass(out, sr, cutoff_hz=lowpass_hz, order=3)
     airy = softened - postprocess.lowpass(
         softened,
@@ -228,10 +174,6 @@ def inner_monologue(
 def radio(
     wav_data: np.ndarray,
     sr: int,
-    use_standard_chain: bool = False,
-    target_loudness: float = -23.0,
-    trim_silence: bool = False,
-    enable_eq: bool = False,
     enable_saturate: bool = True,
     enable_delay: bool = True,
     enable_reverb: bool = True,
@@ -251,14 +193,7 @@ def radio(
 ) -> np.ndarray:
     """收音机/广播：中频突出，带一点箱体和空间感。"""
     audio = _ensure_float_audio(wav_data)
-    out = _apply_standard_chain(
-        audio,
-        sr,
-        use_standard_chain=use_standard_chain,
-        target_loudness=target_loudness,
-        trim_silence=trim_silence,
-        enable_eq=enable_eq,
-    )
+    out = audio
     filtered = postprocess.bandpass(out, sr, low_cut_hz=low_cut_hz, high_cut_hz=high_cut_hz)
     colored = filtered
     if enable_saturate:
@@ -285,10 +220,6 @@ def radio(
 def intercom(
     wav_data: np.ndarray,
     sr: int,
-    use_standard_chain: bool = False,
-    target_loudness: float = -23.0,
-    trim_silence: bool = False,
-    enable_eq: bool = False,
     enable_saturate: bool = True,
     enable_reverb: bool = False,
     enable_limiter: bool = True,
@@ -304,14 +235,7 @@ def intercom(
 ) -> np.ndarray:
     """对讲机：更窄、更硬的中频质感。"""
     audio = _ensure_float_audio(wav_data)
-    out = _apply_standard_chain(
-        audio,
-        sr,
-        use_standard_chain=use_standard_chain,
-        target_loudness=target_loudness,
-        trim_silence=trim_silence,
-        enable_eq=enable_eq,
-    )
+    out = audio
     filtered = postprocess.bandpass(out, sr, low_cut_hz=low_cut_hz, high_cut_hz=high_cut_hz)
     colored = filtered
     if enable_saturate:

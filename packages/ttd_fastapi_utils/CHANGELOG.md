@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.1 (2026-03-28)
+
+- postprocess / preset
+  - Add reusable filter/effect primitives: `butter_filter`, `lowpass`, `highpass`, `bandpass`, `delay`, `reverb`, `saturate`, `mix`, `limiter`
+  - Add style presets: `telephone`, `smart_assistant`, `inner_monologue`, `radio`, `intercom`
+  - Separate `Standard Postprocess` from `Style Preset` so business-side cleanup and style design can be applied independently
+  - Keep `apply_postprocess(...)` focused on cleanup: optional `trim_silence`, `loudnorm`, and optional `eq`
+- debug app
+  - Add single-file Gradio preset debugger with bilingual UI, auto-play output, logging, and independent `Standard Postprocess` / `Style Preset` controls
+  - Improve preset sync so preset defaults and switch states are reflected correctly in the UI
+- package
+  - Export `postprocess` and `preset` modules from top-level package
+  - Make `SmartModel` import optional to avoid forcing heavy dependencies in lightweight postprocess-only environments
+
 ## 0.3.0 (2026-01-27)
 
 - speed_control

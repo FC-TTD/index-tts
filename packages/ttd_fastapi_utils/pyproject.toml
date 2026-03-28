@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ttd-fastapi-utils"
-version = "0.3.0"
+version = "0.3.1"
 description = "TTD FastAPI Utils: cuda_health (/health + optional home probe /), home_probe payload, ttd_notify notifier, postprocess utilities (loudness/EQ/limiter), and SmartModel"
 readme = "README.md"
 requires-python = ">=3.8"

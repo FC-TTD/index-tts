@@ -40,10 +40,6 @@ FILTER_LABELS = {
 }
 
 PRESET_PARAM_ORDER = [
-    "use_standard_chain",
-    "target_loudness",
-    "trim_silence",
-    "enable_eq",
     "enable_saturate",
     "enable_delay",
     "enable_reverb",
@@ -67,10 +63,6 @@ PRESET_PARAM_ORDER = [
 ]
 
 PRESET_FALLBACK_DEFAULTS = {
-    "use_standard_chain": True,
-    "target_loudness": -23.0,
-    "trim_silence": False,
-    "enable_eq": True,
     "enable_saturate": True,
     "enable_delay": True,
     "enable_reverb": True,
@@ -93,6 +85,39 @@ PRESET_FALLBACK_DEFAULTS = {
     "limiter_threshold": 0.98,
 }
 
+PRESET_STANDARD_CHAIN_DEFAULTS = {
+    "telephone": {
+        "use_standard_chain": False,
+        "target_loudness": -23.0,
+        "trim_silence": False,
+        "enable_eq": True,
+    },
+    "smart_assistant": {
+        "use_standard_chain": False,
+        "target_loudness": -23.0,
+        "trim_silence": False,
+        "enable_eq": True,
+    },
+    "inner_monologue": {
+        "use_standard_chain": False,
+        "target_loudness": -23.0,
+        "trim_silence": False,
+        "enable_eq": False,
+    },
+    "radio": {
+        "use_standard_chain": False,
+        "target_loudness": -23.0,
+        "trim_silence": False,
+        "enable_eq": False,
+    },
+    "intercom": {
+        "use_standard_chain": False,
+        "target_loudness": -23.0,
+        "trim_silence": False,
+        "enable_eq": False,
+    },
+}
+
 
 def _preset_help_text(preset_name: str) -> str:
     help_map = {
@@ -104,8 +129,9 @@ def _preset_help_text(preset_name: str) -> str:
             ),
         "smart_assistant": (
             "smart_assistant 模拟智能语音\n"
-            "- Core character 核心音色: standard chain + bandpass + light saturation + delay tail + subtle reverb\n"
+            "- Core character 核心音色: bandpass + light saturation + delay tail\n"
             "- Main active controls 主要生效参数: low_cut_hz / high_cut_hz / wet_ratio / drive / saturate_wet / delay_ms / decay / repeats / delay_wet / reverb_wet / limiter_threshold\n"
+            "- Recommended pipeline 推荐链路: business side applies standard postprocess first, then this preset\n"
             "- Space tuning 空间参数: reverb_room_size / reverb_damping / reverb_pre_delay_ms"
         ),
         "inner_monologue": (
@@ -153,7 +179,38 @@ def _get_preset_defaults(name: str) -> Dict[str, object]:
 
 def sync_preset_controls(preset_name: str):
     values = _get_preset_defaults(preset_name)
-    return tuple(gr.update(value=values[key]) for key in PRESET_PARAM_ORDER)
+    standard = PRESET_STANDARD_CHAIN_DEFAULTS.get(
+        preset_name,
+        PRESET_STANDARD_CHAIN_DEFAULTS["smart_assistant"],
+    )
+    return (
+        gr.update(value=standard["use_standard_chain"]),
+        gr.update(value=standard["target_loudness"]),
+        gr.update(value=standard["trim_silence"]),
+        gr.update(value=standard["enable_eq"]),
+        *(gr.update(value=values[key]) for key in PRESET_PARAM_ORDER),
+    )
+
+
+def _apply_standard_postprocess(
+    wav: np.ndarray,
+    sr: int,
+    *,
+    enable: bool,
+    target_loudness: float,
+    trim_silence: bool,
+    enable_eq: bool,
+) -> np.ndarray:
+    if not enable:
+        return wav
+    return postprocess.apply_postprocess(
+        wav,
+        sr,
+        target_loudness=target_loudness,
+        enable=True,
+        trim_silence=trim_silence,
+        enable_eq=enable_eq,
+    )
 
 
 def _normalize_audio_dtype(audio: np.ndarray) -> np.ndarray:
@@ -304,11 +361,13 @@ def process_audio(
     wav = np.clip(wav, -1.0, 1.0).astype(np.float32, copy=False)
 
     if mode == "preset":
-        ui_preset_params = {
-            "use_standard_chain": use_standard_chain,
+        standard_chain_params = {
+            "enable": use_standard_chain,
             "target_loudness": target_loudness,
             "trim_silence": trim_silence,
             "enable_eq": enable_eq,
+        }
+        ui_preset_params = {
             "enable_saturate": enable_saturate,
             "enable_delay": enable_delay,
             "enable_reverb": enable_reverb,
@@ -332,7 +391,15 @@ def process_audio(
         }
         preset_params = _get_preset_defaults(preset_name)
         preset_params.update(ui_preset_params)
-        out = _call_preset(preset_name, wav, sr, preset_params)
+        wav_for_preset = _apply_standard_postprocess(
+            wav,
+            sr,
+            enable=use_standard_chain,
+            target_loudness=target_loudness,
+            trim_silence=trim_silence,
+            enable_eq=enable_eq,
+        )
+        out = _call_preset(preset_name, wav_for_preset, sr, preset_params)
         log_timestamp = _append_apply_log(
             {
                 "mode": mode,
@@ -341,7 +408,8 @@ def process_audio(
                 "mono": bool(use_mono),
                 "input_samples": int(wav.shape[0]) if wav.ndim == 1 else list(wav.shape),
                 "output_peak": float(np.max(np.abs(out))) if out.size else 0.0,
-                "preset_params": preset_params,
+                "standard_chain": standard_chain_params,
+                "preset_style_params": preset_params,
             }
         )
         summary = [
@@ -349,6 +417,7 @@ def process_audio(
             "Preset 预设: %s" % PRESET_LABELS.get(preset_name, preset_name),
             "Sample Rate 采样率: %s" % sr,
             "Mono 单声道: %s" % use_mono,
+            "Standard Chain 标准链: %s" % use_standard_chain,
             "Peak 峰值: %.4f" % float(np.max(np.abs(out))) if out.size else "Peak 峰值: 0.0000",
             "Log 记录时间: %s" % log_timestamp,
             "Log File 日志文件: %s" % _LOG_PATH,
@@ -446,14 +515,16 @@ def build_app() -> gr.Blocks:
             """
             # TTD Postprocess Preset Debugger / TTD 后处理预设调试台
 
-            上传一段音频后，可以直接试听内置 preset，或者切到 custom 模式手工组合滤波、饱和、延迟和标准后处理链。  
-            Upload an audio clip, then either preview built-in presets or switch to custom mode to stack filters, saturation, delay, and the standard post-process chain manually.
+            上传一段音频后，可以选择两套独立流程：先做标准后处理，再叠加风格 preset；或者切到 custom 模式手工组合整条链。  
+            Upload an audio clip, then use two independent stages: standard postprocess first, then style presets; or switch to custom mode to build the whole chain manually.
 
             **使用建议 / Tips**
-            - `Preset` 模式适合快速找方向；`Custom` 模式适合精调和手工凹效果。  
-              `Preset` mode is for fast exploration; `Custom` mode is for manual sound design.
-            - 现在所有 preset 都只绑定 `基础处理参数 / Core Processing Controls`。  
-              All presets now use only the shared core processing controls.
+            - `Preset` 模式现在分成两段：`Standard Postprocess` 和 `Style Preset`。  
+              `Preset` mode now has two stages: `Standard Postprocess` and `Style Preset`.
+            - `Custom` 模式适合实验底层积木；`Preset` 模式适合业务试听和定稿。  
+              `Custom` mode is for low-level experiments; `Preset` mode is for business review and preset tuning.
+            - `Filter Type / 滤波类型` 只在 `Custom` 模式下生效；`Preset` 模式由具体 preset 决定用哪种滤波。  
+              `Filter Type` only applies in `Custom` mode; presets decide their own filtering.
             - 现在已经支持 `Reverb / 混响`，用于补空间感；`Delay` 更偏回声，`Reverb` 更偏房间尾音。  
               `Reverb` is now available for ambience; `Delay` behaves more like echo, while `Reverb` feels more like room tail.
             - 页面下方的 `处理摘要 / Processing Summary` 会告诉你当前 preset 主要响应哪些参数。  
@@ -487,20 +558,21 @@ def build_app() -> gr.Blocks:
                 choices=[(PRESET_LABELS[name], name) for name in PRESET_CHOICES],
                 value="smart_assistant",
             )
+            filter_type = gr.Dropdown(
+                label="Custom Filter Type / 自定义滤波类型",
+                choices=[(FILTER_LABELS[name], name) for name in FILTER_CHOICES],
+                value="bandpass",
+                info="Only used in Custom mode / 仅在 Custom 模式下生效",
+            )
 
-        with gr.Accordion("Standard Chain / 标准链参数", open=False):
+        with gr.Accordion("Standard Postprocess / 标准后处理", open=False):
             with gr.Row():
-                use_standard_chain = gr.Checkbox(label="Enable Standard Chain / 启用标准后处理链", value=True)
+                use_standard_chain = gr.Checkbox(label="Enable Standard Postprocess / 启用标准后处理", value=True)
                 trim_silence = gr.Checkbox(label="Trim Leading/Trailing Silence / 裁剪首尾静音", value=False)
                 enable_eq = gr.Checkbox(label="Enable Default EQ / 启用默认 EQ", value=True)
             target_loudness = gr.Slider(label="Target LUFS / 目标 LUFS", minimum=-32.0, maximum=-12.0, value=-23.0, step=0.5)
 
-        with gr.Accordion("Core Processing Controls / 基础处理参数", open=True):
-            filter_type = gr.Dropdown(
-                label="Filter Type / 滤波类型",
-                choices=[(FILTER_LABELS[name], name) for name in FILTER_CHOICES],
-                value="bandpass",
-            )
+        with gr.Accordion("Style Preset Controls / 预设风格参数", open=True):
             with gr.Row():
                 low_cut_hz = gr.Slider(label="Low Cut Hz / 低切频率", minimum=20.0, maximum=4000.0, value=170.0, step=10.0)
                 high_cut_hz = gr.Slider(label="High Cut Hz / 高切频率", minimum=500.0, maximum=12000.0, value=4250.0, step=50.0)
