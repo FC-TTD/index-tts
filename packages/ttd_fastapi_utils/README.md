@@ -144,7 +144,9 @@ wav = postprocess.bandpass(wav, sr, low_cut_hz=300.0, high_cut_hz=3400.0)
 - `bandpass(wav, sr, low_cut_hz, high_cut_hz, order=4)`
   - 基础滤波积木，适合组合电话、广播、朦胧、回忆等效果
 - `delay(wav, sr, delay_ms, decay, repeats)`
-  - 多次衰减延迟；返回叠加后的 wet signal
+  - 多次衰减延迟；返回包含原始信号的 composite signal
+- `delay_tail(wav, sr, delay_ms, decay, repeats)`
+  - 多次衰减延迟；仅返回 wet-only echo tail，不包含原始信号
 - `reverb(wav, sr, room_size=0.45, damping=0.35, pre_delay_ms=18.0)`
   - 轻量 Schroeder 风格混响原语，适合业务层自己叠加房间感、尾音和空间感
 - `saturate(wav, drive=1.3)`
@@ -212,6 +214,10 @@ wav = postprocess.apply_postprocess(wav, sr, ...)
 wav = preset.apply_preset("smart_assistant", wav, sr)
 ```
 
+更完整的实现建议见：
+
+- [`PRESET_UI_GUIDE.md`](./PRESET_UI_GUIDE.md)
+
 ### Preset
 
 Recommended import style:
@@ -225,6 +231,8 @@ wav2 = preset.inner_monologue(wav, sr, delay_ms=95.0, wet_ratio=0.35)
 
 - `list_presets()`
   - 当前内置：`telephone`、`smart_assistant`、`inner_monologue`、`radio`、`intercom`
+- `preset_metadata(name=None)`
+  - 返回 preset 元数据，适合 UI 层读取显示名、主要参数和推荐标准链默认值
 - `apply_preset(name, wav, sr, **kwargs)`
   - 按名称应用 preset，支持中英文别名，例如 `电话`、`智能语音`、`心声`
 - `telephone(wav, sr, ...)`
