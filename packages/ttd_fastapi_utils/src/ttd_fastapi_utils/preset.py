@@ -1,8 +1,17 @@
-from typing import Callable, Dict, Iterable
+from copy import deepcopy
+from typing import Any, Callable, Dict, Iterable, Optional
 
 import numpy as np
 
 from . import postprocess
+
+_CANONICAL_PRESETS = (
+    "telephone",
+    "smart_assistant",
+    "inner_monologue",
+    "radio",
+    "intercom",
+)
 
 
 def _ensure_float_audio(wav_data: np.ndarray) -> np.ndarray:
@@ -255,6 +264,83 @@ def intercom(
     return mixed
 
 
+_PRESET_METADATA: Dict[str, Dict[str, Any]] = {
+    "telephone": {
+        "display_name": "telephone 电话音",
+        "summary": "bandpass + saturation",
+        "primary_controls": ["low_cut_hz", "high_cut_hz", "wet_ratio", "drive", "limiter_threshold"],
+        "secondary_controls": ["reverb_room_size", "reverb_damping", "reverb_pre_delay_ms", "reverb_wet"],
+        "recommended_standard_postprocess": {
+            "enable": False,
+            "target_loudness": -23.0,
+            "trim_silence": False,
+            "enable_eq": True,
+        },
+    },
+    "smart_assistant": {
+        "display_name": "smart_assistant 模拟智能语音",
+        "summary": "bandpass + light saturation + delay tail",
+        "primary_controls": [
+            "low_cut_hz",
+            "high_cut_hz",
+            "wet_ratio",
+            "drive",
+            "saturate_wet",
+            "delay_ms",
+            "decay",
+            "repeats",
+            "delay_wet",
+            "reverb_wet",
+            "limiter_threshold",
+        ],
+        "secondary_controls": ["reverb_room_size", "reverb_damping", "reverb_pre_delay_ms"],
+        "recommended_standard_postprocess": {
+            "enable": False,
+            "target_loudness": -23.0,
+            "trim_silence": False,
+            "enable_eq": True,
+        },
+        "implementation_note": "Business-side standard postprocess should be applied explicitly before this preset when needed.",
+    },
+    "inner_monologue": {
+        "display_name": "inner_monologue 心声独白",
+        "summary": "lowpass + short echo + soft reverb",
+        "primary_controls": ["lowpass_hz", "delay_ms", "decay", "repeats", "wet_ratio", "reverb_wet", "limiter_threshold"],
+        "secondary_controls": ["reverb_room_size", "reverb_damping", "reverb_pre_delay_ms"],
+        "recommended_standard_postprocess": {
+            "enable": False,
+            "target_loudness": -23.0,
+            "trim_silence": False,
+            "enable_eq": False,
+        },
+    },
+    "radio": {
+        "display_name": "radio 广播/收音机",
+        "summary": "mid-focused bandpass + saturation + tiny room tail",
+        "primary_controls": ["low_cut_hz", "high_cut_hz", "drive", "delay_ms", "decay", "repeats", "wet_ratio", "reverb_wet", "limiter_threshold"],
+        "secondary_controls": ["reverb_room_size", "reverb_damping", "reverb_pre_delay_ms"],
+        "recommended_standard_postprocess": {
+            "enable": False,
+            "target_loudness": -23.0,
+            "trim_silence": False,
+            "enable_eq": False,
+        },
+    },
+    "intercom": {
+        "display_name": "intercom 对讲机",
+        "summary": "narrow bandpass + harder saturation",
+        "primary_controls": ["low_cut_hz", "high_cut_hz", "wet_ratio", "drive", "limiter_threshold"],
+        "secondary_controls": ["reverb_room_size", "reverb_damping", "reverb_pre_delay_ms", "reverb_wet"],
+        "recommended_standard_postprocess": {
+            "enable": False,
+            "target_loudness": -23.0,
+            "trim_silence": False,
+            "enable_eq": False,
+        },
+    },
+}
+
+
 _PRESETS = {
     "telephone": telephone,
     "phone": telephone,
@@ -275,7 +361,7 @@ _PRESETS = {
 
 def list_presets() -> Iterable[str]:
     """返回可用 preset 名称（去重后的 canonical names）。"""
-    return ("telephone", "smart_assistant", "inner_monologue", "radio", "intercom")
+    return _CANONICAL_PRESETS
 
 
 def apply_preset(name: str, wav_data: np.ndarray, sr: int, **kwargs) -> np.ndarray:
@@ -290,3 +376,16 @@ def apply_preset(name: str, wav_data: np.ndarray, sr: int, **kwargs) -> np.ndarr
 def preset_map() -> Dict[str, Callable[..., np.ndarray]]:
     """返回 preset 注册表副本，便于业务层查看或扩展。"""
     return dict(_PRESETS)
+
+
+def preset_metadata(name: Optional[str] = None) -> Dict[str, Any]:
+    """返回 preset 元数据；传 name 时返回单个 preset 的元数据副本。"""
+    if name is None:
+        return deepcopy(_PRESET_METADATA)
+    key = str(name).lower()
+    if key not in _PRESETS:
+        raise ValueError("unsupported preset: %s" % name)
+    canonical = next(
+        canonical_name for canonical_name in _CANONICAL_PRESETS if _PRESETS[canonical_name] is _PRESETS[key]
+    )
+    return deepcopy(_PRESET_METADATA[canonical])

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.2 (2026-03-28)
+
+- postprocess
+  - Clarify `delay(...)` semantics: it returns a composite signal that already includes the direct signal
+  - Add `delay_tail(...)` for explicit wet-only echo tails
+- preset
+  - Add `preset_metadata(...)` so UI/documentation can consume stable preset labels, summaries, primary controls, and recommended standard-chain defaults
+- debug app / docs
+  - Make preset labels, help text, and recommended standard postprocess defaults derive from preset metadata instead of duplicated UI-side hardcoded tables
+  - Add a dedicated `PRESET_UI_GUIDE.md` to document the recommended split between `Preset` implementation and `Preset UI`
+
 ## 0.3.1 (2026-03-28)
 
 - postprocess / preset

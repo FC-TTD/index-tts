@@ -20,6 +20,7 @@ from ttd_fastapi_utils.postprocess import (
     apply_postprocess,
     bandpass,
     delay,
+    delay_tail,
     eq,
     highpass,
     lowpass,
@@ -124,6 +125,16 @@ def test_delay_and_mix_run():
         raise AssertionError("delay/mix output invalid")
 
 
+def test_delay_tail_is_wet_only():
+    sr = 22050
+    x = gen_sine(sr=sr, freq=700.0, seconds=0.35, amp=0.5)
+    tail = delay_tail(x, sr, delay_ms=60.0, decay=0.35, repeats=2)
+    composite = delay(x, sr, delay_ms=60.0, decay=0.35, repeats=2)
+    if not isinstance(tail, np.ndarray) or tail.shape != x.shape:
+        raise AssertionError("delay_tail output invalid")
+    assert_allclose(composite, x + tail, atol=1e-5, rtol=1e-5)
+
+
 def test_reverb_runs_and_preserve_shape():
     sr = 24000
     x = gen_sine(sr=sr, freq=520.0, seconds=0.45, amp=0.5)
@@ -169,6 +180,14 @@ def test_preset_aliases_work():
         raise AssertionError("preset alias output invalid")
 
 
+def test_preset_metadata_available():
+    metadata = preset.preset_metadata("smart_assistant")
+    if metadata["display_name"] != "smart_assistant 模拟智能语音":
+        raise AssertionError("preset metadata display_name mismatch")
+    if metadata["recommended_standard_postprocess"]["enable"] is not False:
+        raise AssertionError("preset metadata standard-chain recommendation mismatch")
+
+
 def main():
     tests = [
         test_loudnorm_short_audio_padding_no_exception,
@@ -178,10 +197,12 @@ def main():
         test_basic_filters_run_and_preserve_shape,
         test_saturate_runs_and_limits,
         test_delay_and_mix_run,
+        test_delay_tail_is_wet_only,
         test_reverb_runs_and_preserve_shape,
         test_mix_shape_mismatch_raises,
         test_preset_list_and_apply,
         test_preset_aliases_work,
+        test_preset_metadata_available,
     ]
     for t in tests:
         t()

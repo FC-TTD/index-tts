@@ -105,7 +105,7 @@ def delay(
     decay: float,
     repeats: int,
 ) -> np.ndarray:
-    """多次衰减延迟，不混入 dry signal，仅返回叠加后的结果。"""
+    """多次衰减延迟，返回包含原始信号的 composite signal。"""
     base_audio = _ensure_float_audio(wav_data)
     orig_dtype = base_audio.dtype
     audio = base_audio.astype(np.float64, copy=False)
@@ -115,6 +115,33 @@ def delay(
         return audio.astype(orig_dtype, copy=True)
 
     out = audio.astype(np.float64, copy=True)
+    for i in range(1, repeats + 1):
+        gain = decay ** i
+        start = delay_samples * i
+        if start >= len(audio):
+            break
+        out[start:] += gain * audio[:-start]
+    return out.astype(orig_dtype, copy=False)
+
+
+def delay_tail(
+    wav_data: np.ndarray,
+    sr: int,
+    *,
+    delay_ms: float,
+    decay: float,
+    repeats: int,
+) -> np.ndarray:
+    """多次衰减延迟，仅返回 wet-only echo tail，不包含原始信号。"""
+    base_audio = _ensure_float_audio(wav_data)
+    orig_dtype = base_audio.dtype
+    audio = base_audio.astype(np.float64, copy=False)
+    delay_samples = max(int(sr * delay_ms / 1000.0), 1)
+    repeats = max(int(repeats), 0)
+    out = np.zeros_like(audio, dtype=np.float64)
+    if repeats == 0 or decay == 0.0:
+        return out.astype(orig_dtype, copy=False)
+
     for i in range(1, repeats + 1):
         gain = decay ** i
         start = delay_samples * i

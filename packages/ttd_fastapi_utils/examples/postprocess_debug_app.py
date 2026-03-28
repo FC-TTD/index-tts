@@ -23,14 +23,12 @@ preset = importlib.import_module("ttd_fastapi_utils.preset")
 
 
 PRESET_CHOICES = list(preset.list_presets())
+PRESET_METADATA = preset.preset_metadata()
 FILTER_CHOICES = ["none", "lowpass", "highpass", "bandpass"]
 MODE_CHOICES = [("Preset 预设模式", "preset"), ("Custom 自定义模式", "custom")]
 PRESET_LABELS = {
-    "telephone": "telephone 电话音",
-    "smart_assistant": "smart_assistant 模拟智能语音",
-    "inner_monologue": "inner_monologue 心声独白",
-    "radio": "radio 广播/收音机",
-    "intercom": "intercom 对讲机",
+    name: PRESET_METADATA[name]["display_name"]
+    for name in PRESET_CHOICES
 }
 FILTER_LABELS = {
     "none": "none 不滤波",
@@ -85,75 +83,32 @@ PRESET_FALLBACK_DEFAULTS = {
     "limiter_threshold": 0.98,
 }
 
-PRESET_STANDARD_CHAIN_DEFAULTS = {
-    "telephone": {
-        "use_standard_chain": False,
-        "target_loudness": -23.0,
-        "trim_silence": False,
-        "enable_eq": True,
-    },
-    "smart_assistant": {
-        "use_standard_chain": False,
-        "target_loudness": -23.0,
-        "trim_silence": False,
-        "enable_eq": True,
-    },
-    "inner_monologue": {
-        "use_standard_chain": False,
-        "target_loudness": -23.0,
-        "trim_silence": False,
-        "enable_eq": False,
-    },
-    "radio": {
-        "use_standard_chain": False,
-        "target_loudness": -23.0,
-        "trim_silence": False,
-        "enable_eq": False,
-    },
-    "intercom": {
-        "use_standard_chain": False,
-        "target_loudness": -23.0,
-        "trim_silence": False,
-        "enable_eq": False,
-    },
-}
-
-
 def _preset_help_text(preset_name: str) -> str:
-    help_map = {
-            "telephone": (
-                "telephone 电话音\n"
-            "- Core character 核心音色: bandpass + saturation\n"
-            "- Main active controls 主要生效参数: low_cut_hz / high_cut_hz / wet_ratio / drive / limiter_threshold\n"
-            "- Optional ambience 可选空间感: reverb_room_size / reverb_damping / reverb_pre_delay_ms / reverb_wet"
-            ),
-        "smart_assistant": (
-            "smart_assistant 模拟智能语音\n"
-            "- Core character 核心音色: bandpass + light saturation + delay tail\n"
-            "- Main active controls 主要生效参数: low_cut_hz / high_cut_hz / wet_ratio / drive / saturate_wet / delay_ms / decay / repeats / delay_wet / reverb_wet / limiter_threshold\n"
-            "- Recommended pipeline 推荐链路: business side applies standard postprocess first, then this preset\n"
-            "- Space tuning 空间参数: reverb_room_size / reverb_damping / reverb_pre_delay_ms"
-        ),
-        "inner_monologue": (
-            "inner_monologue 心声独白\n"
-            "- Core character 核心音色: lowpass + short echo + airy tail + soft reverb\n"
-            "- Main active controls 主要生效参数: lowpass_hz / delay_ms / decay / repeats / wet_ratio / reverb_wet / limiter_threshold\n"
-            "- Space tuning 空间参数: reverb_room_size / reverb_damping / reverb_pre_delay_ms"
-        ),
-        "radio": (
-            "radio 广播/收音机\n"
-            "- Core character 核心音色: mid-focused bandpass + saturation + tiny room tail\n"
-            "- Main active controls 主要生效参数: low_cut_hz / high_cut_hz / drive / delay_ms / decay / repeats / wet_ratio / reverb_wet / limiter_threshold\n"
-            "- Space tuning 空间参数: reverb_room_size / reverb_damping / reverb_pre_delay_ms"
-        ),
-        "intercom": (
-            "intercom 对讲机\n"
-            "- Core character 核心音色: narrow bandpass + harder saturation\n"
-            "- Main active controls 主要生效参数: low_cut_hz / high_cut_hz / wet_ratio / drive / limiter_threshold\n"
-            "- Optional ambience 可选空间感: reverb_room_size / reverb_damping / reverb_pre_delay_ms / reverb_wet"
-        ),
-    }
-    return help_map.get(preset_name, "No preset help available.")
+    metadata = PRESET_METADATA.get(preset_name, {})
+    lines = [
+        metadata.get("display_name", preset_name),
+        "- Core character 核心音色: %s" % metadata.get("summary", "n/a"),
+    ]
+    primary = metadata.get("primary_controls") or []
+    secondary = metadata.get("secondary_controls") or []
+    if primary:
+        lines.append("- Main active controls 主要生效参数: %s" % " / ".join(primary))
+    if secondary:
+        lines.append("- Secondary controls 次要参数: %s" % " / ".join(secondary))
+    note = metadata.get("implementation_note")
+    if note:
+        lines.append("- Recommended pipeline 推荐链路: %s" % note)
+    standard = metadata.get("recommended_standard_postprocess") or {}
+    lines.append(
+        "- Standard postprocess default 标准后处理默认建议: enable=%s / trim_silence=%s / enable_eq=%s / target_loudness=%s"
+        % (
+            standard.get("enable", False),
+            standard.get("trim_silence", False),
+            standard.get("enable_eq", False),
+            standard.get("target_loudness", -23.0),
+        )
+    )
+    return "\n".join(lines)
 
 
 def _append_apply_log(payload: Dict[str, object]) -> str:
@@ -179,12 +134,15 @@ def _get_preset_defaults(name: str) -> Dict[str, object]:
 
 def sync_preset_controls(preset_name: str):
     values = _get_preset_defaults(preset_name)
-    standard = PRESET_STANDARD_CHAIN_DEFAULTS.get(
-        preset_name,
-        PRESET_STANDARD_CHAIN_DEFAULTS["smart_assistant"],
-    )
+    metadata = PRESET_METADATA.get(preset_name, {})
+    standard = metadata.get("recommended_standard_postprocess") or {
+        "enable": False,
+        "target_loudness": -23.0,
+        "trim_silence": False,
+        "enable_eq": True,
+    }
     return (
-        gr.update(value=standard["use_standard_chain"]),
+        gr.update(value=standard["enable"]),
         gr.update(value=standard["target_loudness"]),
         gr.update(value=standard["trim_silence"]),
         gr.update(value=standard["enable_eq"]),
