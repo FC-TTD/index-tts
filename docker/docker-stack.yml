@@ -15,6 +15,7 @@ services:
       - INDEXTTS_HF_LOCAL_ONLY=true
       - TORCH_EXTENSIONS_DIR=/opt/torch_extensions/ttd-worker-api-1
       - TORCHINDUCTOR_CACHE_DIR=/opt/torchinductor/ttd-worker-api-1
+      - ENABLE_GRADIO_UI=false
     volumes:
       - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
       - /TTD-Data/index-tts/hf-cache:/opt/hf_cache
@@ -68,7 +69,7 @@ services:
     image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}
     environment:
       - TZ=Asia/Shanghai
-      - NVIDIA_VISIBLE_DEVICES=1
+      - NVIDIA_VISIBLE_DEVICES=2
       - HF_HOME=/opt/hf_cache
       - HF_HUB_CACHE=/opt/hf_cache/hub
       - TRANSFORMERS_CACHE=/opt/hf_cache/transformers
@@ -77,6 +78,7 @@ services:
       - INDEXTTS_HF_LOCAL_ONLY=true
       - TORCH_EXTENSIONS_DIR=/opt/torch_extensions/ttd-worker-api-2
       - TORCHINDUCTOR_CACHE_DIR=/opt/torchinductor/ttd-worker-api-2
+      - ENABLE_GRADIO_UI=false
     volumes:
       - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
       - /TTD-Data/index-tts/hf-cache:/opt/hf_cache
@@ -105,7 +107,7 @@ services:
     image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}
     environment:
       - TZ=Asia/Shanghai
-      - NVIDIA_VISIBLE_DEVICES=2
+      - NVIDIA_VISIBLE_DEVICES=1
       - HF_HOME=/opt/hf_cache
       - HF_HUB_CACHE=/opt/hf_cache/hub
       - TRANSFORMERS_CACHE=/opt/hf_cache/transformers
@@ -114,6 +116,8 @@ services:
       - INDEXTTS_HF_LOCAL_ONLY=true
       - TORCH_EXTENSIONS_DIR=/opt/torch_extensions/ttd-worker-api-3
       - TORCHINDUCTOR_CACHE_DIR=/opt/torchinductor/ttd-worker-api-3
+      - ENABLE_GRADIO_UI=true
+      - GRADIO_MOUNT_PATH=/
     volumes:
       - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
       - /TTD-Data/index-tts/hf-cache:/opt/hf_cache
@@ -137,6 +141,15 @@ services:
         condition: any
         max_attempts: 10
         delay: 10s
+      labels:
+        caddy_1: http://xique
+        caddy_1.reverse_proxy: "index-tts_api-3:8000"
+        caddy_1.reverse_proxy.health_uri: /health
+        caddy_1.reverse_proxy.health_interval: 10s
+        caddy_1.reverse_proxy.health_timeout: 2s
+        caddy_1.reverse_proxy.health_fails: 1
+        caddy_1.reverse_proxy.health_passes: 1
+        caddy_1.reverse_proxy.health_status: 200
 
   # api-4:
   #   image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}

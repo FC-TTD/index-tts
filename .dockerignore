@@ -31,5 +31,4 @@ assets/
 examples/
 archive/
 ansible/
-webui.py
 deploy.sh

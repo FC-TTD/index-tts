@@ -52,4 +52,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=10m --retries=5 \
 ENV TTD_WEBHOOK_URL="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=4e5f3845-cd5f-43a0-b004-231e710c68e4"
 
 ENTRYPOINT ["tini", "--"]
-CMD ["python", "api.py", "--model_dir", "/app/checkpoints", "--host", "0.0.0.0", "--port", "8000", "--fp16"]
+CMD ["python", "entry.py", "--model_dir", "/app/checkpoints", "--host", "0.0.0.0", "--port", "8000", "--fp16"]
