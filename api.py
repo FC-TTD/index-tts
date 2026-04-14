@@ -5,6 +5,7 @@ from io import BytesIO
 import logging
 import json
 import os
+from pathlib import Path
 import sys
 import tempfile
 import time
@@ -17,6 +18,36 @@ warnings.filterwarnings("ignore", category=UserWarning)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 sys.path.append(os.path.join(current_dir, "indextts"))
+
+
+def _ensure_runtime_cache_env() -> None:
+    hf_home = Path(os.getenv("HF_HOME", "/opt/hf_cache"))
+    hf_hub_cache = Path(os.getenv("HF_HUB_CACHE", str(hf_home / "hub")))
+    transformers_cache = Path(os.getenv("TRANSFORMERS_CACHE", str(hf_home / "transformers")))
+    modelscope_cache = Path(os.getenv("MODELSCOPE_CACHE", str(hf_home / "modelscope")))
+    torch_extensions_dir = Path(os.getenv("TORCH_EXTENSIONS_DIR", "/tmp/torch_extensions"))
+    torchinductor_cache_dir = Path(os.getenv("TORCHINDUCTOR_CACHE_DIR", "/tmp/torchinductor"))
+
+    os.environ.setdefault("HF_HOME", str(hf_home))
+    os.environ.setdefault("HF_HUB_CACHE", str(hf_hub_cache))
+    os.environ.setdefault("TRANSFORMERS_CACHE", str(transformers_cache))
+    os.environ.setdefault("MODELSCOPE_CACHE", str(modelscope_cache))
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+    os.environ.setdefault("TORCH_EXTENSIONS_DIR", str(torch_extensions_dir))
+    os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str(torchinductor_cache_dir))
+
+    for path in (
+        hf_home,
+        hf_hub_cache,
+        transformers_cache,
+        modelscope_cache,
+        torch_extensions_dir,
+        torchinductor_cache_dir,
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+
+
+_ensure_runtime_cache_env()
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -53,6 +84,7 @@ parser.add_argument("--device", type=str, default=None, help="Device to run the 
 parser.add_argument("--use_deepspeed", action=argparse.BooleanOptionalAction, default=False, help="Use DeepSpeed if available (default: disabled)")
 parser.add_argument("--use_accel", action=argparse.BooleanOptionalAction, default=True, help="Use Accelerate for multi-GPU if available (default: disabled)")
 parser.add_argument("--use_torch_compile", action=argparse.BooleanOptionalAction, default=True, help="Use torch.compile for inference (default: disabled)")
+parser.add_argument("--preload_model", action=argparse.BooleanOptionalAction, default=True, help="Preload the model at startup so runtime requests do not trigger external downloads")
 cmd_args = parser.parse_args()
 
 # 检查模型目录是否存在
@@ -62,13 +94,14 @@ if not os.path.exists(cmd_args.model_dir):
 
 # 全局模型实例
 tts_manager = None
+model_ready = False
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     应用程序生命周期管理
     """
-    global tts_manager
+    global model_ready, tts_manager
     
     # 创建输出目录
     os.makedirs("outputs", exist_ok=True)
@@ -97,10 +130,16 @@ async def lifespan(app: FastAPI):
         from ttd_fastapi_utils import SmartModel
         # Default 2h timeout
         tts_manager = SmartModel(loader, timeout_seconds=7200)
+        if cmd_args.preload_model:
+            logger.info("启动阶段预热 IndexTTS2 模型，等待权重、缓存和 CUDA 扩展全部就绪...")
+            tts_manager.get()
+            logger.info("IndexTTS2 模型预热完成")
+        model_ready = True
         logger.info("IndexTTS2 模型管理器初始化完成")
         yield
     finally:
         logger.info("正在关闭 IndexTTS2 模型管理器...")
+        model_ready = False
         if tts_manager:
             tts_manager.stop()
         tts_manager = None
@@ -117,7 +156,7 @@ app = FastAPI(
 cuda_monitor = setup_cuda_health(
     app,
     path="/health",
-    ready_predicate=lambda: tts_manager is not None,
+    ready_predicate=lambda: model_ready,
 )
 
 # 添加 CORS 中间件
