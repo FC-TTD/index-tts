@@ -92,6 +92,7 @@ def build_semantic_model(
     if local_files_only is None:
         local_files_only = os.path.isdir(model_path)
     semantic_model = Wav2Vec2BertModel.from_pretrained(model_path, local_files_only=local_files_only)
+    semantic_model.eval()
     stat_mean_var = torch.load(path_)
     semantic_mean = stat_mean_var["mean"]
     semantic_std = torch.sqrt(stat_mean_var["var"])

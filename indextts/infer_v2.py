@@ -1,6 +1,13 @@
 import os
 from subprocess import CalledProcessError
 
+_DEFAULT_HF_HOME = os.getenv("HF_HOME", "/opt/hf_cache")
+os.environ.setdefault("HF_HOME", _DEFAULT_HF_HOME)
+os.environ.setdefault("HF_HUB_CACHE", os.path.join(_DEFAULT_HF_HOME, "hub"))
+os.environ.setdefault("TRANSFORMERS_CACHE", os.path.join(_DEFAULT_HF_HOME, "transformers"))
+os.environ.setdefault("MODELSCOPE_CACHE", os.path.join(_DEFAULT_HF_HOME, "modelscope"))
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", "/tmp/torchinductor")
 import json
 import re
 import time
@@ -81,6 +88,8 @@ class IndexTTS2:
 
         self.cfg = OmegaConf.load(cfg_path)
         self.model_dir = model_dir
+        self.hf_cache_dir = os.getenv("HF_HUB_CACHE", os.path.join(self.model_dir, "hf_cache"))
+        self.hf_local_files_only = os.getenv("INDEXTTS_HF_LOCAL_ONLY", "false").lower() in {"1", "true", "yes", "on"}
         self.dtype = torch.float16 if self.use_fp16 else None
         self.stop_mel_token = self.cfg.gpt.stop_mel_token
         self.use_accel = use_accel

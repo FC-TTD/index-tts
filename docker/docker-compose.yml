@@ -5,8 +5,19 @@ services:
     container_name: indextts-api-test
     environment:
       - TZ=Asia/Shanghai
+      - HF_HOME=/opt/hf_cache
+      - HF_HUB_CACHE=/opt/hf_cache/hub
+      - TRANSFORMERS_CACHE=/opt/hf_cache/transformers
+      - MODELSCOPE_CACHE=/opt/hf_cache/modelscope
+      - HF_HUB_DISABLE_XET=1
+      - INDEXTTS_HF_LOCAL_ONLY=true
+      - TORCH_EXTENSIONS_DIR=/opt/torch_extensions/local-indextts
+      - TORCHINDUCTOR_CACHE_DIR=/opt/torchinductor/local-indextts
     volumes:
       - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
+      - /TTD-Data/index-tts/hf-cache:/opt/hf_cache
+      - /TTD-Data/index-tts/torch-extensions:/opt/torch_extensions
+      - /TTD-Data/index-tts/torchinductor:/opt/torchinductor
     ports:
       - "7800:8000"
     tty: true

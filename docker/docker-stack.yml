@@ -7,8 +7,19 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - NVIDIA_VISIBLE_DEVICES=0
+      - HF_HOME=/opt/hf_cache
+      - HF_HUB_CACHE=/opt/hf_cache/hub
+      - TRANSFORMERS_CACHE=/opt/hf_cache/transformers
+      - MODELSCOPE_CACHE=/opt/hf_cache/modelscope
+      - HF_HUB_DISABLE_XET=1
+      - INDEXTTS_HF_LOCAL_ONLY=true
+      - TORCH_EXTENSIONS_DIR=/opt/torch_extensions/ttd-worker-api-1
+      - TORCHINDUCTOR_CACHE_DIR=/opt/torchinductor/ttd-worker-api-1
     volumes:
       - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
+      - /TTD-Data/index-tts/hf-cache:/opt/hf_cache
+      - /TTD-Data/index-tts/torch-extensions:/opt/torch_extensions
+      - /TTD-Data/index-tts/torchinductor:/opt/torchinductor
     networks:
       - caddy
     deploy:
@@ -58,8 +69,19 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - NVIDIA_VISIBLE_DEVICES=1
+      - HF_HOME=/opt/hf_cache
+      - HF_HUB_CACHE=/opt/hf_cache/hub
+      - TRANSFORMERS_CACHE=/opt/hf_cache/transformers
+      - MODELSCOPE_CACHE=/opt/hf_cache/modelscope
+      - HF_HUB_DISABLE_XET=1
+      - INDEXTTS_HF_LOCAL_ONLY=true
+      - TORCH_EXTENSIONS_DIR=/opt/torch_extensions/ttd-worker-api-2
+      - TORCHINDUCTOR_CACHE_DIR=/opt/torchinductor/ttd-worker-api-2
     volumes:
       - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
+      - /TTD-Data/index-tts/hf-cache:/opt/hf_cache
+      - /TTD-Data/index-tts/torch-extensions:/opt/torch_extensions
+      - /TTD-Data/index-tts/torchinductor:/opt/torchinductor
     networks:
       - caddy
     deploy:
@@ -84,8 +106,19 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - NVIDIA_VISIBLE_DEVICES=2
+      - HF_HOME=/opt/hf_cache
+      - HF_HUB_CACHE=/opt/hf_cache/hub
+      - TRANSFORMERS_CACHE=/opt/hf_cache/transformers
+      - MODELSCOPE_CACHE=/opt/hf_cache/modelscope
+      - HF_HUB_DISABLE_XET=1
+      - INDEXTTS_HF_LOCAL_ONLY=true
+      - TORCH_EXTENSIONS_DIR=/opt/torch_extensions/ttd-worker-api-3
+      - TORCHINDUCTOR_CACHE_DIR=/opt/torchinductor/ttd-worker-api-3
     volumes:
       - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
+      - /TTD-Data/index-tts/hf-cache:/opt/hf_cache
+      - /TTD-Data/index-tts/torch-extensions:/opt/torch_extensions
+      - /TTD-Data/index-tts/torchinductor:/opt/torchinductor
     networks:
       - caddy
     deploy:
