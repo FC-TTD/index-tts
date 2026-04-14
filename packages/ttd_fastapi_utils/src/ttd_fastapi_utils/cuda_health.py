@@ -6,7 +6,7 @@ import signal
 import threading
 import time
 from collections import deque
-from typing import Optional, Tuple
+from typing import Mapping, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,7 @@ class CudaHealthMonitor:
         self.limit = max(1, int(limit or 3))
         self._results: deque[bool] = deque(maxlen=self.limit)
         self._last_error_message: Optional[str] = None
+        self._last_error_context: Optional[dict[str, str]] = None
         self._last_error_ts: Optional[float] = None
         self._unhealthy_notified: bool = False
         self.terminate_on_unhealthy: bool = bool(terminate_on_unhealthy)
@@ -39,19 +40,60 @@ class CudaHealthMonitor:
     def record_success(self) -> None:
         self._results.append(True)
 
-    def record_error(self, exc: Exception) -> None:
+    def _store_failure_context(self, context: Optional[Mapping[str, object]] = None) -> None:
+        if not context:
+            return
+        normalized: dict[str, str] = {}
+        for key, value in context.items():
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                normalized[str(key)] = text
+        if normalized:
+            self._last_error_context = normalized
+
+    def record_error(self, exc: Exception, context: Optional[Mapping[str, object]] = None) -> None:
         if self.is_cuda_error(exc):
             self._results.append(False)
             self._last_error_message = str(exc)
+            self._store_failure_context(context)
             self._last_error_ts = time.time()
         else:
             self._results.append(True)
 
-    def record_cuda_failure(self, message: Optional[str] = None) -> None:
+    def record_cuda_failure(self, message: Optional[str] = None, context: Optional[Mapping[str, object]] = None) -> None:
         self._results.append(False)
         if message:
             self._last_error_message = message
+        self._store_failure_context(context)
         self._last_error_ts = time.time()
+
+    def _format_failure_detail(self) -> str:
+        parts = [f"最近 {self.limit} 次推理均为 CUDA 错误。"]
+        context = self._last_error_context or {}
+
+        app_name = context.get("app_name")
+        business = context.get("business")
+        method = context.get("method")
+        route = context.get("route")
+        request_id = context.get("request_id")
+        container = context.get("container")
+
+        if app_name:
+            parts.append(f"服务: {app_name}")
+        if business:
+            parts.append(f"业务: {business}")
+        if method or route:
+            endpoint = " ".join(part for part in (method, route) if part)
+            parts.append(f"接口: {endpoint}")
+        if request_id:
+            parts.append(f"请求ID: {request_id}")
+        if container:
+            parts.append(f"实例: {container}")
+        if self._last_error_message:
+            parts.append(f"最后错误: {self._last_error_message}")
+        return " ".join(parts)
 
     def is_unhealthy(self) -> bool:
         n = self.limit
@@ -63,15 +105,15 @@ class CudaHealthMonitor:
 
         if unhealthy:
             if not self._unhealthy_notified:
-                detail = f"最近 {self.limit} 次推理均为 CUDA 错误。"
-                if self._last_error_message:
-                    detail += f" 最后错误: {self._last_error_message}"
+                detail = self._format_failure_detail()
                 try:
                     if self._notifier is not None:
                         self._notifier.send_error_message(f"/health 不健康：{detail}")
                 except Exception:
                     logger.exception("发送不健康通知失败")
                 self._unhealthy_notified = True
+            else:
+                detail = self._format_failure_detail()
 
             if self.terminate_on_unhealthy and not self._kill_scheduled:
                 self._kill_scheduled = True

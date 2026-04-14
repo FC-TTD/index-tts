@@ -11,6 +11,18 @@ Includes five modules:
 - `preset`: Ready-to-use audio style presets built on top of `postprocess`.
 - `speed_control`: Pitch-preserving time-stretch helpers via external tools (SoX/FFmpeg).
 
+## Repository Status
+
+`ttd-fastapi-utils` is currently colocated inside the `index-tts` repository only for fast integration testing.
+It is maintained as an independent package with its own packaging and publication path, and it should not be treated as part of the `index-tts` service runtime or deployment lifecycle.
+
+Practical implications:
+
+- Release this package through `packages/pub.yml`, not through the service Docker/Swarm deployment flow.
+- Validate package changes in the package context first.
+- Do not assume the repository root `.venv` is the correct environment for this package.
+- When running tests from the repository root, make sure imports resolve to `packages/ttd_fastapi_utils/src` instead of an already installed wheel or site-package copy.
+
 ## Install (monorepo)
 
 This repository uses the src layout. You may import directly in the monorepo or install the wheel built from this package.
@@ -26,6 +38,46 @@ If running outside the monorepo, build and install the wheel:
 python -m build  # or `hatch build`
 pip install dist/ttd_fastapi_utils-*.whl
 ```
+
+## Package-Local Development
+
+Treat this package as an independent Python project even when working from the monorepo.
+
+Recommended local workflow:
+
+```bash
+# from packages/ttd_fastapi_utils
+uv venv
+PYTHONPATH=src uv run pytest tests/test_home_probe.py tests/test_fastapi_integration.py
+```
+
+If you prefer running from the repository root, keep imports pinned to the local package source:
+
+```bash
+# from repository root
+PYTHONPATH="packages/ttd_fastapi_utils/src" uv run pytest \
+  packages/ttd_fastapi_utils/tests/test_home_probe.py \
+  packages/ttd_fastapi_utils/tests/test_fastapi_integration.py
+```
+
+Notes:
+
+- Prefer the package-local environment under `packages/ttd_fastapi_utils/` for package validation.
+- Do not assume the repository root `.venv` matches this package's dependency set.
+- `PYTHONPATH=src` or `PYTHONPATH="packages/ttd_fastapi_utils/src"` avoids accidentally testing an already installed wheel.
+
+## Pre-Publish Routing
+
+Before publishing `ttd-fastapi-utils`, validate the package through the package path, not the service deployment path.
+
+Release routing checklist:
+
+- Run package tests against the local development source.
+- Run at least one FastAPI integration test that mounts the plugin into a real app and exercises real HTTP requests.
+- Include one real audio HTTP integration check for `postprocess` or `preset`, so publication is not gated only by health-route coverage.
+- Include FastAPI integration coverage for the remaining exported runtime helpers that affect service behavior, including `SmartModel`, `speed_control`, and notifier wiring.
+- Publish through `packages/pub.yml`.
+- Do not use `ansible/site.yml`, Docker Compose, or Swarm deployment as the default validation path for this package.
 
 ## Quick Start
 

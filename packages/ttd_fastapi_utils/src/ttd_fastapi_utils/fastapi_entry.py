@@ -14,21 +14,80 @@ from .home_probe import build_home_payload
 logger = logging.getLogger(__name__)
 
 
+def _should_track_request(request: Request) -> bool:
+    try:
+        app = getattr(request, "app", None)
+        state = getattr(app, "state", None)
+        health_path = getattr(state, "cuda_health_path", "/health")
+        path = getattr(getattr(request, "url", None), "path", None)
+        if not path:
+            return True
+        return path != health_path
+    except Exception:
+        logger.exception("判断请求是否参与 CUDA 健康统计失败")
+        return True
+
+
+def _failure_context_from_request(request: Request) -> dict[str, str]:
+    try:
+        app = getattr(request, "app", None)
+        state = getattr(request, "state", None)
+        headers = getattr(request, "headers", None)
+
+        def _header(name: str):
+            try:
+                return headers.get(name) if headers is not None else None
+            except Exception:
+                return None
+
+        context = {
+            "app_name": getattr(app, "title", None)
+            or os.getenv("APP_NAME")
+            or "FastAPI",
+            "method": getattr(request, "method", None),
+            "route": getattr(getattr(request, "url", None), "path", None),
+            "request_id": _header("x-request-id")
+            or _header("x-correlation-id")
+            or _header("traceparent"),
+            "container": os.getenv("HOSTNAME") or os.getenv("CONTAINER_NAME"),
+            "business": getattr(state, "business_name", None)
+            if state is not None
+            else None,
+        }
+        normalized: dict[str, str] = {}
+        for key, value in context.items():
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                normalized[key] = text
+        return normalized
+    except Exception:
+        logger.exception("提取 CUDA 失败上下文失败")
+        return {}
+
+
 def _build_middleware(monitor: CudaHealthMonitor):
     async def dispatch(request: Request, call_next: Callable[[Request], Response]):
         try:
             response = await call_next(request)
+            if not _should_track_request(request):
+                return response
             if response.status_code < 500:
                 monitor.record_success()
             else:
                 if response.headers.get("x-cuda-error") == "1":
-                    monitor.record_cuda_failure()
+                    monitor.record_cuda_failure(
+                        context=_failure_context_from_request(request)
+                    )
                 else:
                     monitor.record_success()
             return response
         except Exception as exc:  # noqa: BLE001
             try:
-                monitor.record_error(exc)
+                monitor.record_error(
+                    exc, context=_failure_context_from_request(request)
+                )
             except Exception:
                 logger.exception("记录推理结果失败")
             raise
@@ -50,7 +109,9 @@ def init_cuda_health_plugin(
         except Exception:
             limit = 3
 
-    monitor = CudaHealthMonitor(limit=limit, notifier=notifier, terminate_on_unhealthy=terminate_on_unhealthy)
+    monitor = CudaHealthMonitor(
+        limit=limit, notifier=notifier, terminate_on_unhealthy=terminate_on_unhealthy
+    )
 
     app.add_middleware(BaseHTTPMiddleware, dispatch=_build_middleware(monitor))
 
@@ -89,7 +150,11 @@ def init_cuda_health_plugin(
                             headers = scope.get("headers") or []
                             for name, value in headers:
                                 try:
-                                    if name.lower() == b"user-agent" and "uptime-kuma" in value.decode("latin1").lower():
+                                    if (
+                                        name.lower() == b"user-agent"
+                                        and "uptime-kuma"
+                                        in value.decode("latin1").lower()
+                                    ):
                                         return False
                                 except Exception:
                                     break
@@ -120,12 +185,16 @@ def init_cuda_health_plugin(
     async def _http_exc_handler(request: Request, exc: HTTPException):
         response = await http_exception_handler(request, exc)
         try:
-            if response.status_code >= 500:
+            if _should_track_request(request) and response.status_code >= 500:
                 detail = exc.detail
-                if isinstance(detail, str) and any(k in detail.lower() for k in CUDA_KEYWORDS):
+                if isinstance(detail, str) and any(
+                    k in detail.lower() for k in CUDA_KEYWORDS
+                ):
                     response.headers["x-cuda-error"] = "1"
                     try:
-                        monitor.record_cuda_failure(detail)
+                        monitor.record_cuda_failure(
+                            detail, context=_failure_context_from_request(request)
+                        )
                     except Exception:
                         logger.exception("在异常处理器中记录 CUDA 失败出错")
         except Exception:
@@ -134,6 +203,7 @@ def init_cuda_health_plugin(
 
     app.state.cuda_health_monitor = monitor
     app.state.cuda_health_ready_predicate = ready_predicate
+    app.state.cuda_health_path = getattr(app.state, "cuda_health_path", "/health")
     return monitor
 
 
@@ -156,7 +226,9 @@ def check_health(
     if not is_ready:
         raise HTTPException(status_code=503, detail="模型未初始化")
 
-    monitor: Optional[CudaHealthMonitor] = getattr(app.state, "cuda_health_monitor", None)
+    monitor: Optional[CudaHealthMonitor] = getattr(
+        app.state, "cuda_health_monitor", None
+    )
     if monitor is None:
         return {"status": "healthy"}
 
@@ -200,7 +272,9 @@ def _has_user_home_route(app) -> bool:
 
 def _make_home_response(app, healthy: bool, unhealthy_detail: Optional[object]):
     app_name = getattr(app, "title", None) or os.getenv("APP_NAME", "FastAPI")
-    payload = build_home_payload(app_name=app_name, healthy=healthy, unhealthy_detail=unhealthy_detail)
+    payload = build_home_payload(
+        app_name=app_name, healthy=healthy, unhealthy_detail=unhealthy_detail
+    )
 
     if not healthy:
         resp = JSONResponse(payload, status_code=503)
@@ -227,7 +301,9 @@ def setup_cuda_health(
     enable_default_home: bool = True,
 ):
     if suppress_access_paths is None:
-        _suppress_paths = ("/health", "/docs", "/") if enable_default_home else ("/health", "/docs")
+        _suppress_paths = (
+            ("/health", "/docs", "/") if enable_default_home else ("/health", "/docs")
+        )
     else:
         _suppress_paths = tuple(suppress_access_paths)
 
@@ -240,12 +316,18 @@ def setup_cuda_health(
         terminate_on_unhealthy=terminate_on_unhealthy,
     )
 
+    app.state.cuda_health_path = path
+
     mount_health_route(app, path=path)
 
-    if enable_default_home and not getattr(app.state, "cuda_health_default_home_installed", False):
+    if enable_default_home and not getattr(
+        app.state, "cuda_health_default_home_installed", False
+    ):
         app.state.cuda_health_default_home_installed = True
 
-        async def _default_home_dispatch(request: Request, call_next: Callable[[Request], Response]):
+        async def _default_home_dispatch(
+            request: Request, call_next: Callable[[Request], Response]
+        ):
             try:
                 if request.method not in ("GET", "HEAD"):
                     return await call_next(request)
@@ -265,7 +347,9 @@ def setup_cuda_health(
                     else:
                         raise
 
-                return _make_home_response(app, healthy=healthy, unhealthy_detail=unhealthy_detail)
+                return _make_home_response(
+                    app, healthy=healthy, unhealthy_detail=unhealthy_detail
+                )
             except Exception:
                 logger.exception("默认首页探活处理中间件异常")
                 return await call_next(request)
