@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.3 (2026-04-14)
+
+- cuda_health / fastapi_entry
+  - Include service name, route, request ID, container, and optional business context in unhealthy CUDA details and notifications
+  - Prevent `/health` requests from polluting the tracked failure context
+  - Harden request context extraction so malformed request objects degrade safely instead of breaking the health pipeline
+- tests / package validation
+  - Add package-level FastAPI integration coverage for CUDA health routing, audio `postprocess`, audio `preset`, `speed_control`, `SmartModel`, and notifier wiring
+  - Add explicit package-local development and pre-publish routing guidance for validating the development source before publication
+
 ## 0.3.2 (2026-03-28)
 
 - postprocess

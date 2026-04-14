@@ -5,6 +5,7 @@
   - role: /workspace/z/ansible/roles/pypi_pub
     vars:
       pypi_pub_url: "https://devpi/root/ttd/"
+      pypi_pub_verify_url: "https://pypi-server/root/ttd"
       pypi_pub_curl_verbose: false
       pypi_pub_curl_ignore_conflict: true
       pypi_pub_extra_twine_args: "--verbose"
