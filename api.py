@@ -143,8 +143,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--preload_model",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Preload the model at startup so runtime requests do not trigger external downloads",
+        default=False,
+        help="Preload the model at startup instead of relying on SmartModel lazy loading",
     )
     return parser
 
@@ -226,7 +226,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
         app,
         path="/health",
         ready_predicate=lambda: model_state["ready"],
-        enable_default_home=False,
+        enable_default_home=True,
     )
 
     app.add_middleware(
