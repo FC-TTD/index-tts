@@ -117,7 +117,8 @@ services:
       - TORCH_EXTENSIONS_DIR=/opt/torch_extensions/ttd-worker-api-3
       - TORCHINDUCTOR_CACHE_DIR=/opt/torchinductor/ttd-worker-api-3
       - ENABLE_GRADIO_UI=true
-      - GRADIO_MOUNT_PATH=/
+      - GRADIO_MOUNT_PATH=/__gradio__
+      - GRADIO_ALLOWED_HOSTS=xique
     volumes:
       - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
       - /TTD-Data/index-tts/hf-cache:/opt/hf_cache
