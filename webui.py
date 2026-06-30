@@ -121,11 +121,17 @@ class NamedAudioInput:
         self.orig_name = orig_name
 
 
-class NamedAudio(gr.Audio):
-    def preprocess(self, payload):
-        path = super().preprocess(payload)
+def NamedAudio(*args, **kwargs):
+    component = gr.Audio(*args, **kwargs)
+    base_preprocess = component.preprocess
+
+    def preprocess(payload):
+        path = base_preprocess(payload)
         orig_name = getattr(payload, "orig_name", None) if payload is not None else None
         return NamedAudioInput(path=path, orig_name=orig_name)
+
+    component.preprocess = preprocess
+    return component
 
 
 def _audio_path(value):

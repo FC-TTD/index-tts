@@ -431,6 +431,13 @@ or visit the IndexTTS1 repository at <a href="https://github.com/index-tts/index
 
 ## Our Releases and Demos
 
+## TTD runtime notes
+
+This checkout contains local TTD deployment/runtime notes for the xique public
+Gradio route and generated audio download filenames:
+
+- [`docs/operations/ttd-runtime-notes.md`](docs/operations/ttd-runtime-notes.md)
+
 ### IndexTTS2: [[Paper]](https://arxiv.org/abs/2506.21619); [[Demo]](https://index-tts.github.io/index-tts2.github.io/); [[ModelScope]](https://modelscope.cn/studios/IndexTeam/IndexTTS-2-Demo); [[HuggingFace]](https://huggingface.co/spaces/IndexTeam/IndexTTS-2-Demo)
 
 ### IndexTTS1: [[Paper]](https://arxiv.org/abs/2502.05512); [[Demo]](https://index-tts.github.io/); [[ModelScope]](https://modelscope.cn/studios/IndexTeam/IndexTTS-Demo); [[HuggingFace]](https://huggingface.co/spaces/IndexTeam/IndexTTS)
