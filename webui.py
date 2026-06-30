@@ -22,6 +22,7 @@ if indextts_dir not in sys.path:
 
 import gradio as gr
 
+from download_filename import build_download_filename
 from indextts.infer_v2 import IndexTTS2
 from tools.i18n.i18n import I18nAuto
 
@@ -112,6 +113,37 @@ EMO_CHOICES_ALL = [
     i18n("使用情感描述文本控制"),
 ]
 EMO_CHOICES_OFFICIAL = EMO_CHOICES_ALL[:-1]
+
+
+class NamedAudioInput:
+    def __init__(self, path: str | None, orig_name: str | None = None):
+        self.path = path
+        self.orig_name = orig_name
+
+
+class NamedAudio(gr.Audio):
+    def preprocess(self, payload):
+        path = super().preprocess(payload)
+        orig_name = getattr(payload, "orig_name", None) if payload is not None else None
+        return NamedAudioInput(path=path, orig_name=orig_name)
+
+
+def _audio_path(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return value.get("path") or value.get("name")
+    return getattr(value, "path", None) or getattr(value, "name", None)
+
+
+def _audio_orig_name(value):
+    if value is None or isinstance(value, str):
+        return None
+    if isinstance(value, dict):
+        return value.get("orig_name")
+    return getattr(value, "orig_name", None)
 
 
 def _default_examples() -> list[list[object]]:
@@ -280,7 +312,14 @@ def build_demo(
             progress=gr.Progress(),
         ):
             tts = get_tts()
-            output_path = os.path.join("outputs", f"spk_{int(time.time())}.wav")
+            prompt_orig_name = _audio_orig_name(prompt)
+            emo_orig_name = _audio_orig_name(emo_ref_path)
+            prompt_path = _audio_path(prompt)
+            emo_ref_path = _audio_path(emo_ref_path)
+            source_name = prompt_orig_name or emo_orig_name or "source"
+            output_path = os.path.join(
+                "outputs", build_download_filename(source_name, text)
+            )
             tts.gr_progress = progress
             (
                 do_sample,
@@ -316,7 +355,7 @@ def build_demo(
 
             with mutex:
                 output = tts.infer(
-                    spk_audio_prompt=prompt,
+                    spk_audio_prompt=prompt_path,
                     text=text,
                     output_path=output_path,
                     emo_audio_prompt=emo_ref_path,
@@ -342,7 +381,7 @@ def build_demo(
 
         with gr.Tab(i18n("音频生成")):
             with gr.Row():
-                prompt_audio = gr.Audio(
+                prompt_audio = NamedAudio(
                     label=i18n("音色参考音频"),
                     key="prompt_audio",
                     sources=["upload", "microphone"],
@@ -387,7 +426,7 @@ def build_demo(
 
             with gr.Group(visible=False) as emotion_reference_group:
                 with gr.Row():
-                    emo_upload = gr.Audio(
+                    emo_upload = NamedAudio(
                         label=i18n("上传情感参考音频"), type="filepath"
                     )
 
