@@ -118,7 +118,7 @@ services:
       - TORCHINDUCTOR_CACHE_DIR=/opt/torchinductor/ttd-worker-api-3
       - ENABLE_GRADIO_UI=true
       - GRADIO_MOUNT_PATH=/__gradio__
-      - GRADIO_ALLOWED_HOSTS=xique
+      - GRADIO_ALLOWED_HOSTS=xique,xique-tts.api.ttd.honeywave.net
     volumes:
       - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
       - /TTD-Data/index-tts/hf-cache:/opt/hf_cache
@@ -151,6 +151,18 @@ services:
         caddy_1.reverse_proxy.health_fails: 1
         caddy_1.reverse_proxy.health_passes: 1
         caddy_1.reverse_proxy.health_status: 200
+        caddy_2: http://xique-tts-public-proxy
+        caddy_2.reverse_proxy: "index-tts_api-3:8000"
+        caddy_2.reverse_proxy.header_up: "Host xique-tts.api.ttd.honeywave.net"
+        caddy_2.reverse_proxy.header_up_1: "X-Forwarded-Host xique-tts.api.ttd.honeywave.net"
+        caddy_2.reverse_proxy.header_up_2: "X-Forwarded-Proto https"
+        caddy_2.reverse_proxy.header_up_3: "X-Forwarded-Port 443"
+        caddy_2.reverse_proxy.health_uri: /health
+        caddy_2.reverse_proxy.health_interval: 10s
+        caddy_2.reverse_proxy.health_timeout: 2s
+        caddy_2.reverse_proxy.health_fails: 1
+        caddy_2.reverse_proxy.health_passes: 1
+        caddy_2.reverse_proxy.health_status: 200
 
   # api-4:
   #   image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}

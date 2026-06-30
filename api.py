@@ -64,6 +64,7 @@ import librosa
 import soundfile as sf
 import uvicorn
 
+from download_filename import build_content_disposition, build_download_filename
 from indextts.infer_v2 import IndexTTS2
 
 try:
@@ -421,10 +422,18 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                 buffer = BytesIO()
                 sf.write(buffer, wav, sr, format="WAV")
                 buffer.seek(0)
+                source_name = (
+                    prompt_speech.filename
+                    or (emo_audio_prompt.filename if emo_audio_prompt is not None else None)
+                    or "source"
+                )
+                download_filename = build_download_filename(source_name, text)
 
                 return Response(
                     headers={
-                        "Content-Disposition": "attachment; filename=generated.wav"
+                        "Content-Disposition": build_content_disposition(
+                            download_filename
+                        )
                     },
                     content=buffer.read(),
                     media_type="audio/wav",
