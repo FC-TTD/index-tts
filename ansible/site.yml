@@ -94,7 +94,7 @@
 
   roles:
     # 使用Docker CI/CD角色
-    - role: /workspace/z/ansible/roles/docker_ci_cd
+    - role: docker_ci_cd
       vars:
         # CI相关变量
         ci_project_name: "{{ project_name }}"
