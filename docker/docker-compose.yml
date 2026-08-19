@@ -15,8 +15,9 @@ services:
       - TORCHINDUCTOR_CACHE_DIR=/opt/torchinductor/local-indextts
       - ENABLE_GRADIO_UI=true
     volumes:
-      - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
+      - /TTD-Data/index-tts/checkpoints-v25:/app/checkpoints
       - /TTD-Data/index-tts/hf-cache:/opt/hf_cache
+      - /TTD-Data/index-tts/hf-cache:/app/checkpoints/hf_cache
       - /TTD-Data/index-tts/torch-extensions:/opt/torch_extensions
       - /TTD-Data/index-tts/torchinductor:/opt/torchinductor
     ports:

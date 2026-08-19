@@ -17,8 +17,9 @@ services:
       - TORCHINDUCTOR_CACHE_DIR=/opt/torchinductor/ttd-worker-api-1
       - ENABLE_GRADIO_UI=false
     volumes:
-      - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
+      - /TTD-Data/index-tts/checkpoints-v25:/app/checkpoints
       - /TTD-Data/index-tts/hf-cache:/opt/hf_cache
+      - /TTD-Data/index-tts/hf-cache:/app/checkpoints/hf_cache
       - /TTD-Data/index-tts/torch-extensions:/opt/torch_extensions
       - /TTD-Data/index-tts/torchinductor:/opt/torchinductor
     networks:
@@ -80,8 +81,9 @@ services:
       - TORCHINDUCTOR_CACHE_DIR=/opt/torchinductor/ttd-worker-api-2
       - ENABLE_GRADIO_UI=false
     volumes:
-      - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
+      - /TTD-Data/index-tts/checkpoints-v25:/app/checkpoints
       - /TTD-Data/index-tts/hf-cache:/opt/hf_cache
+      - /TTD-Data/index-tts/hf-cache:/app/checkpoints/hf_cache
       - /TTD-Data/index-tts/torch-extensions:/opt/torch_extensions
       - /TTD-Data/index-tts/torchinductor:/opt/torchinductor
     networks:
@@ -120,8 +122,9 @@ services:
       - GRADIO_MOUNT_PATH=/__gradio__
       - GRADIO_ALLOWED_HOSTS=xique,xique-tts.api.ttd.honeywave.net
     volumes:
-      - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
+      - /TTD-Data/index-tts/checkpoints-v25:/app/checkpoints
       - /TTD-Data/index-tts/hf-cache:/opt/hf_cache
+      - /TTD-Data/index-tts/hf-cache:/app/checkpoints/hf_cache
       - /TTD-Data/index-tts/torch-extensions:/opt/torch_extensions
       - /TTD-Data/index-tts/torchinductor:/opt/torchinductor
     networks:
@@ -170,7 +173,7 @@ services:
   #     - TZ=Asia/Shanghai
   #     - NVIDIA_VISIBLE_DEVICES=2
   #   volumes:
-  #     - /TTD-Data/index-tts/checkpoints-v2:/app/checkpoints
+  #     - /TTD-Data/index-tts/checkpoints-v25:/app/checkpoints
   #   networks:
   #     - caddy
   #   deploy:

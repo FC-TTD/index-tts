@@ -6,7 +6,6 @@ __pycache__/
 .vscode/
 
 # Environments.
-.conda/
 .venv*/
 venv*/
 conda_env*/
@@ -15,8 +14,8 @@ conda_env*/
 *.py[cod]
 
 # Distribution/Packaging.
-build/
-dist/
+/build/
+/dist/
 *.egg-info/
 .pypirc
 
@@ -27,6 +26,13 @@ desktop.ini
 
 # IndexTTS.
 /cache/
-/checkpoints/*
-!/checkpoints/*.yaml
+/checkpoints*/*
+!/checkpoints*/*.yaml
 /outputs/
+
+# Example audio files (downloaded on demand, not stored in git)
+/examples/*.wav
+/tests/sample_prompt.wav
+
+.claude
+.memsearch

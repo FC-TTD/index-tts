@@ -19,9 +19,7 @@ def test_build_download_filename_preserves_chinese_and_epoch():
 
 def test_sanitize_filename_part_replaces_illegal_and_fallbacks():
     assert (
-        sanitize_filename_part(
-            "../a<b:c*?.wav", "source", 48, strip_extension=True
-        )
+        sanitize_filename_part("../a<b:c*?.wav", "source", 48, strip_extension=True)
         == "a_b_c"
     )
     assert sanitize_filename_part("hello.world", "text", 48) == "hello.world"
@@ -50,7 +48,9 @@ def test_named_audio_preprocess_keeps_orig_name(monkeypatch):
 
     monkeypatch.setattr(gr.Audio, "preprocess", fake_preprocess)
     component = NamedAudio(type="filepath")
-    result = component.preprocess(SimpleNamespace(path="/tmp/upload.wav", orig_name="原始.wav"))
+    result = component.preprocess(
+        SimpleNamespace(path="/tmp/upload.wav", orig_name="原始.wav")
+    )
 
     assert isinstance(result, NamedAudioInput)
     assert result.path == "/tmp/upload.wav"

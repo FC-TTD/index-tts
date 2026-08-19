@@ -65,7 +65,7 @@ import soundfile as sf
 import uvicorn
 
 from download_filename import build_content_disposition, build_download_filename
-from indextts.infer_v2 import IndexTTS2
+from indextts.infer_v2_5 import IndexTTS2
 
 try:
     from ttd_fastapi_utils import (
@@ -89,6 +89,37 @@ logging.basicConfig(
 )
 logger = logging.getLogger("index-tts-api")
 
+LANGUAGE_ALIASES = {
+    "zh": "ZH",
+    "zh-cn": "ZH",
+    "chinese": "ZH",
+    "中文": "ZH",
+    "en": "EN",
+    "english": "EN",
+    "英文": "EN",
+    "ja": "JA",
+    "jp": "JA",
+    "japanese": "JA",
+    "日文": "JA",
+    "日语": "JA",
+    "es": "ES",
+    "spanish": "ES",
+    "西班牙文": "ES",
+    "西班牙语": "ES",
+    "ar": "AR",
+    "arabic": "AR",
+    "阿拉伯文": "AR",
+    "阿拉伯语": "AR",
+}
+
+
+def normalize_language(language: str | None) -> str:
+    value = (language or "ZH").strip()
+    normalized = LANGUAGE_ALIASES.get(value.lower(), value.upper())
+    if normalized not in {"ZH", "EN", "JA", "ES", "AR"}:
+        raise ValueError("language must be one of ZH, EN, JA, ES, AR")
+    return normalized
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="IndexTTS API")
@@ -106,10 +137,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Model checkpoints directory",
     )
     parser.add_argument(
-        "--fp16",
+        "--bf16",
         action="store_true",
         default=False,
-        help="Use FP16 to reduce memory and speed up on CUDA",
+        help="Use BF16 to reduce memory and speed up on CUDA",
     )
     parser.add_argument(
         "--use_cuda_kernel",
@@ -132,13 +163,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--use_accel",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help="Use Accelerate for multi-GPU if available (default: disabled)",
     )
     parser.add_argument(
         "--use_torch_compile",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help="Use torch.compile for inference (default: disabled)",
     )
     parser.add_argument(
@@ -157,6 +188,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def validate_model_dir(model_dir: str) -> None:
     if not os.path.exists(model_dir):
         raise FileNotFoundError(f"模型目录 {model_dir} 不存在，请先下载模型。")
+    required = (
+        "config.yaml",
+        "gpt.pth",
+        "s2mel.pth",
+        "codec.pth",
+        "multilingual_zh_ja_yue_char_del.tiktoken",
+        "wav2vec2bert_stats.pt",
+        "qwen0.6bemo4-merge",
+    )
+    missing = [
+        name for name in required if not os.path.exists(os.path.join(model_dir, name))
+    ]
+    if missing:
+        raise FileNotFoundError(
+            f"模型目录 {model_dir} 缺少 IndexTTS 2.5 文件: {', '.join(missing)}"
+        )
 
 
 def create_tts_manager(args: argparse.Namespace) -> SmartModel:
@@ -164,12 +211,13 @@ def create_tts_manager(args: argparse.Namespace) -> SmartModel:
         return IndexTTS2(
             cfg_path=os.path.join(args.model_dir, "config.yaml"),
             model_dir=args.model_dir,
-            use_fp16=bool(args.fp16),
+            use_bf16=bool(args.bf16),
             device=args.device,
             use_cuda_kernel=bool(args.use_cuda_kernel),
             use_deepspeed=bool(args.use_deepspeed),
             use_accel=bool(args.use_accel),
             use_torch_compile=bool(args.use_torch_compile),
+            use_qwen_emo=True,
         )
 
     return SmartModel(loader, timeout_seconds=7200)
@@ -187,8 +235,8 @@ def create_app(args: argparse.Namespace) -> FastAPI:
         os.makedirs("outputs", exist_ok=True)
 
         logger.info(
-            "正在初始化 IndexTTS2 模型管理器... (fp16=%s, use_cuda_kernel=%s, device=%s, use_deepspeed=%s)",
-            args.fp16,
+            "正在初始化 IndexTTS2.5 模型管理器... (bf16=%s, use_cuda_kernel=%s, device=%s, use_deepspeed=%s)",
+            args.bf16,
             args.use_cuda_kernel,
             args.device,
             args.use_deepspeed,
@@ -216,8 +264,8 @@ def create_app(args: argparse.Namespace) -> FastAPI:
 
     app = FastAPI(
         title="IndexTTS API",
-        description="IndexTTS2 语音合成 API 服务",
-        version="2.0.0",
+        description="IndexTTS2.5 语音合成 API 服务",
+        version="2.5.0",
         lifespan=lifespan,
     )
     app.state.cmd_args = args
@@ -241,6 +289,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
     @app.post("/generate")
     async def generate_audio(
         text: str = Form(...),
+        language: str = Form("ZH"),
         prompt_speech: UploadFile = File(...),
         emo_audio_prompt: UploadFile | None = File(None),
         emo_alpha: float = Form(1.0),
@@ -267,6 +316,11 @@ def create_app(args: argparse.Namespace) -> FastAPI:
     ):
         if app.state.tts_manager is None:
             raise HTTPException(status_code=503, detail="模型未初始化")
+
+        try:
+            infer_language = normalize_language(language)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         try:
             temp_path = None
@@ -329,8 +383,9 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                 sr = None
                 for attempt in range(max_retries + 1):
                     logger.info(
-                        "开始生成语音（v2），文本长度: %s, speed=%s, expected_duration=%s, attempt=%s/%s",
+                        "开始生成语音（v2.5），文本长度: %s, language=%s, speed=%s, expected_duration=%s, attempt=%s/%s",
                         len(text),
+                        infer_language,
                         current_speed,
                         current_expected,
                         attempt + 1,
@@ -341,6 +396,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         spk_audio_prompt=temp_path,
                         text=text,
                         output_path=output_path,
+                        lang=infer_language,
                         emo_audio_prompt=emo_temp_path,
                         emo_alpha=float(emo_alpha),
                         emo_vector=emo_vector_list,
@@ -348,7 +404,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         emo_text=emo_text,
                         use_random=bool(use_random),
                         interval_silence=int(interval_silence),
-                        duration_ratio=float(current_speed),
+                        duration_factor=float(current_speed),
                         verbose=args.verbose,
                         max_text_tokens_per_segment=int(max_text_tokens_per_sentence),
                         **kwargs,
@@ -424,7 +480,11 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                 buffer.seek(0)
                 source_name = (
                     prompt_speech.filename
-                    or (emo_audio_prompt.filename if emo_audio_prompt is not None else None)
+                    or (
+                        emo_audio_prompt.filename
+                        if emo_audio_prompt is not None
+                        else None
+                    )
                     or "source"
                 )
                 download_filename = build_download_filename(source_name, text)

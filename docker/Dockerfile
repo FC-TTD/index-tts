@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7-labs
 FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel
 
-ARG UV_VERSION=0.4.23
+ARG UV_VERSION=0.11.3
 ARG PYPI_INDEX="https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Etc/UTC \
@@ -35,11 +35,7 @@ RUN touch /app/indextts/__init__.py
 COPY pyproject.toml uv.lock README.md ./
 
 RUN --mount=type=cache,target=/root/.cache/uv,id=uv-cache \
-    uv sync --extra webui
-
-RUN --mount=type=cache,target=/root/.cache/uv,id=uv-cache \
-    uv sync --all-extras
-RUN uv pip install flash-attn --no-build-isolation
+    uv sync --extra webui --frozen
 
 RUN uv pip install -n "ttd_fastapi_utils>=0.3.3" --index-url http://pypi-server/simple/ --trusted-host pypi-server
 
@@ -52,4 +48,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=10m --retries=5 \
 ENV TTD_WEBHOOK_URL="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=4e5f3845-cd5f-43a0-b004-231e710c68e4"
 
 ENTRYPOINT ["tini", "--"]
-CMD ["python", "entry.py", "--model_dir", "/app/checkpoints", "--host", "0.0.0.0", "--port", "8000", "--fp16"]
+CMD ["python", "entry.py", "--model_dir", "/app/checkpoints", "--host", "0.0.0.0", "--port", "8000", "--bf16"]

@@ -2,6 +2,29 @@
 
 This file records local TTD runtime decisions that are not upstream IndexTTS2 model behavior.
 
+## Model and cache layout
+
+IndexTTS 2.0 and 2.5 weights are kept in separate NAS directories:
+
+- `/TTD-Data/index-tts/checkpoints-v2` is the retained 2.0 rollback model.
+- `/TTD-Data/index-tts/checkpoints-v25` is the active 2.5 model.
+
+The shared `/TTD-Data/index-tts/hf-cache` directory is mounted at both
+`/opt/hf_cache` and `/app/checkpoints/hf_cache`. The first path remains the
+process-wide Hugging Face cache; the second is required because the upstream
+2.5 runtime resolves auxiliary models relative to `model_dir`. Both container
+paths intentionally refer to the same NAS directory.
+
+Do not replace or mix the two primary checkpoint directories. Rollback restores
+the archived 2.0 image together with the `checkpoints-v2` mount.
+
+## API compatibility
+
+`POST /generate` remains the stable provider contract. IndexTTS 2.5 adds the
+optional `language` form field with values `ZH`, `EN`, `JA`, `ES`, and `AR`;
+omitting it preserves the historical Chinese behavior. The provider translates
+the existing `speed` field to the 2.5 `duration_factor` runtime argument.
+
 ## Xique public ingress
 
 `api-3` is the public Gradio/WebUI-facing instance for xique:

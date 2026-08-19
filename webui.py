@@ -5,7 +5,6 @@ import json
 import os
 import sys
 import threading
-import time
 import warnings
 
 import pandas as pd
@@ -23,7 +22,7 @@ if indextts_dir not in sys.path:
 import gradio as gr
 
 from download_filename import build_download_filename
-from indextts.infer_v2 import IndexTTS2
+from indextts.infer_v2_5 import IndexTTS2
 from tools.i18n.i18n import I18nAuto
 
 try:
@@ -53,10 +52,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Model checkpoints directory",
     )
     parser.add_argument(
-        "--fp16",
+        "--bf16",
         action="store_true",
         default=False,
-        help="Use FP16 for inference if available",
+        help="Use BF16 for inference if available",
     )
     parser.add_argument(
         "--deepspeed",
@@ -90,11 +89,13 @@ def validate_model_dir(model_dir: str) -> None:
         )
 
     for file_name in [
-        "bpe.model",
         "gpt.pth",
         "config.yaml",
         "s2mel.pth",
+        "codec.pth",
+        "multilingual_zh_ja_yue_char_del.tiktoken",
         "wav2vec2bert_stats.pt",
+        "qwen0.6bemo4-merge",
     ]:
         file_path = os.path.join(model_dir, file_name)
         if not os.path.exists(file_path):
@@ -222,15 +223,20 @@ def build_demo(
             return IndexTTS2(
                 model_dir=args.model_dir,
                 cfg_path=os.path.join(args.model_dir, "config.yaml"),
-                use_fp16=args.fp16,
+                use_bf16=bool(getattr(args, "bf16", False)),
                 use_deepspeed=deepspeed,
                 use_cuda_kernel=cuda_kernel,
+                use_qwen_emo=True,
             )
 
         tts_manager = SmartModel(tts_loader, timeout_seconds=7200)
 
     if tts_manager_getter is None:
-        tts_manager_getter = lambda: tts_manager
+
+        def get_created_manager():
+            return tts_manager
+
+        tts_manager_getter = get_created_manager
 
     def get_tts():
         manager = tts_manager_getter()
@@ -238,16 +244,24 @@ def build_demo(
             raise RuntimeError("TTS manager is not ready yet")
         return manager.get()
 
-    model_version = "2.0"
+    def get_normalizer(tts):
+        return getattr(tts, "normalizer", None) or getattr(tts, "text_process", None)
+
+    model_version = "2.5"
     glossary_enabled = False
     max_mel_tokens_limit = 1500
     max_text_tokens_limit = max(120, gui_seg_tokens)
     if not allow_lazy_boot:
         boot_tts = get_tts()
         model_version = boot_tts.model_version or "1.0"
-        glossary_enabled = bool(boot_tts.normalizer.enable_glossary)
-        max_mel_tokens_limit = int(boot_tts.cfg.gpt.max_mel_tokens)
-        max_text_tokens_limit = int(boot_tts.cfg.gpt.max_text_tokens)
+        normalizer = get_normalizer(boot_tts)
+        glossary_enabled = bool(normalizer is not None and normalizer.enable_glossary)
+        max_mel_tokens_limit = int(
+            getattr(boot_tts.cfg.gpt, "max_mel_tokens", max_mel_tokens_limit)
+        )
+        max_text_tokens_limit = int(
+            getattr(boot_tts.cfg.gpt, "max_text_tokens", max_text_tokens_limit)
+        )
         del boot_tts
         if created_manager:
             tts_manager.unload()
@@ -268,14 +282,15 @@ def build_demo(
 
     def format_glossary_markdown():
         tts = get_tts()
-        if not tts.normalizer.term_glossary:
+        normalizer = get_normalizer(tts)
+        if normalizer is None or not normalizer.term_glossary:
             return i18n("暂无术语")
 
         lines = [
             f"| {i18n('术语')} | {i18n('中文读法')} | {i18n('英文读法')} |",
             "|---|---|---|",
         ]
-        for term, reading in tts.normalizer.term_glossary.items():
+        for term, reading in normalizer.term_glossary.items():
             zh = reading.get("zh", "") if isinstance(reading, dict) else reading
             en = reading.get("en", "") if isinstance(reading, dict) else reading
             lines.append(f"| {term} | {zh} | {en} |")
@@ -301,6 +316,7 @@ def build_demo(
             emo_control_method,
             prompt,
             text,
+            language,
             emo_ref_path,
             emo_weight,
             vec1,
@@ -364,6 +380,7 @@ def build_demo(
                     spk_audio_prompt=prompt_path,
                     text=text,
                     output_path=output_path,
+                    lang=language,
                     emo_audio_prompt=emo_ref_path,
                     emo_alpha=emo_weight,
                     emo_vector=vec,
@@ -378,9 +395,9 @@ def build_demo(
 
         gr.HTML(
             """
-    <h2><center>IndexTTS2: A Breakthrough in Emotionally Expressive and Duration-Controlled Auto-Regressive Zero-Shot Text-to-Speech</h2>
+    <h2><center>IndexTTS 2.5</h2>
 <p align="center">
-<a href='https://arxiv.org/abs/2506.21619'><img src='https://img.shields.io/badge/ArXiv-2506.21619-red'></a>
+<a href='https://arxiv.org/abs/2601.03888'><img src='https://img.shields.io/badge/ArXiv-2601.03888-red'></a>
 </p>
     """
         )
@@ -399,6 +416,11 @@ def build_demo(
                         key="input_text_single",
                         placeholder=i18n("请输入目标文本"),
                         info=f"{i18n('当前模型版本')}{model_version}",
+                    )
+                    language = gr.Dropdown(
+                        choices=["ZH", "EN", "JA", "ES", "AR"],
+                        value="ZH",
+                        label=i18n("语言"),
                     )
                     gen_button = gr.Button(
                         i18n("生成语音"), key="gen_button", interactive=True
@@ -668,17 +690,23 @@ def build_demo(
         def on_example_click(example):
             return tuple(gr.update(value=example[idx]) for idx in range(14))
 
-        def on_input_text_change(text, max_text_tokens_per_segment):
+        def on_input_text_change(text, language, max_text_tokens_per_segment):
             tts = get_tts()
             if text and len(text) > 0:
-                text_tokens_list = tts.tokenizer.tokenize(text)
-                segments = tts.tokenizer.split_segments(
-                    text_tokens_list,
-                    max_text_tokens_per_segment=int(max_text_tokens_per_segment),
+                lang_prefix = f"<|{str(language or 'ZH').lower()}|> "
+                segments = tts.split_text_by_tokens(
+                    text,
+                    int(max_text_tokens_per_segment),
+                    lang_prefix,
                 )
                 data = []
                 for idx, segment in enumerate(segments):
-                    data.append([idx, "".join(segment), len(segment)])
+                    token_count = len(
+                        tts.tokenizer.encode(
+                            lang_prefix + segment, allowed_special="all"
+                        )
+                    )
+                    data.append([idx, segment, token_count])
                 return {
                     segments_preview: gr.update(value=data, visible=True, type="array")
                 }
@@ -690,6 +718,9 @@ def build_demo(
 
         def on_add_glossary_term(term, reading_zh, reading_en):
             tts = get_tts()
+            normalizer = get_normalizer(tts)
+            if normalizer is None:
+                return gr.update()
             term = term.rstrip()
             reading_zh = reading_zh.rstrip()
             reading_en = reading_en.rstrip()
@@ -709,9 +740,9 @@ def build_demo(
             else:
                 reading = reading_zh or reading_en
 
-            tts.normalizer.term_glossary[term] = reading
+            normalizer.term_glossary[term] = reading
             try:
-                tts.normalizer.save_glossary_to_yaml(tts.glossary_path)
+                normalizer.save_glossary_to_yaml(tts.glossary_path)
                 gr.Info(i18n("词汇表已更新"), duration=1)
             except Exception as exc:
                 gr.Error(i18n("保存词汇表时出错"))
@@ -767,13 +798,19 @@ def build_demo(
 
         def on_glossary_checkbox_change(is_enabled):
             tts = get_tts()
-            tts.normalizer.enable_glossary = is_enabled
+            normalizer = get_normalizer(tts)
+            if normalizer is None:
+                return gr.update(visible=False)
+            normalizer.enable_glossary = is_enabled
             return gr.update(visible=is_enabled)
 
         def on_demo_load():
             tts = get_tts()
+            normalizer = get_normalizer(tts)
+            if normalizer is None:
+                return gr.update(value=i18n("暂无术语"))
             try:
-                tts.normalizer.load_glossary_from_yaml(tts.glossary_path)
+                normalizer.load_glossary_from_yaml(tts.glossary_path)
             except Exception as exc:
                 gr.Error(i18n("加载词汇表时出错"))
                 print(f"Failed to reload glossary on page load: {exc}")
@@ -822,12 +859,17 @@ def build_demo(
         )
         input_text_single.change(
             on_input_text_change,
-            inputs=[input_text_single, max_text_tokens_per_segment],
+            inputs=[input_text_single, language, max_text_tokens_per_segment],
+            outputs=[segments_preview],
+        )
+        language.change(
+            on_input_text_change,
+            inputs=[input_text_single, language, max_text_tokens_per_segment],
             outputs=[segments_preview],
         )
         max_text_tokens_per_segment.change(
             on_input_text_change,
-            inputs=[input_text_single, max_text_tokens_per_segment],
+            inputs=[input_text_single, language, max_text_tokens_per_segment],
             outputs=[segments_preview],
         )
         prompt_audio.upload(update_prompt_audio, inputs=[], outputs=[gen_button])
@@ -843,6 +885,7 @@ def build_demo(
                 emo_control_method,
                 prompt_audio,
                 input_text_single,
+                language,
                 emo_upload,
                 emo_weight,
                 vec1,

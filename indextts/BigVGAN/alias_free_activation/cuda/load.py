@@ -5,7 +5,6 @@ import os
 import pathlib
 import subprocess
 
-import torch
 from torch.utils import cpp_extension
 
 """
@@ -19,13 +18,6 @@ import re
 import shutil
 import tempfile
 
-
-def _get_cuda_cache_root() -> pathlib.Path:
-    cache_root = os.getenv("TORCH_EXTENSIONS_DIR")
-    if cache_root:
-        return pathlib.Path(cache_root) / "bigvgan_cuda"
-    return pathlib.Path(tempfile.gettempdir()) / "torch_extensions" / "bigvgan_cuda"
-
 # 补丁修复：sources 路径含中文字符时，生成 build.ninja 乱码导致编译失败
 # 使用临时目录来规避 ninja 编译失败（比如中文路径）
 def chinese_path_compile_support(sources, buildpath):
@@ -34,7 +26,7 @@ def chinese_path_compile_support(sources, buildpath):
         return buildpath # 检测非中文路径跳过
     # Create build directory
     resolves = [ item.name for item in sources]
-    ninja_compile_dir = str(_get_cuda_cache_root() / "sources")
+    ninja_compile_dir = os.path.join(tempfile.gettempdir(), "BigVGAN", "cuda")
     os.makedirs(ninja_compile_dir, exist_ok=True)
     new_buildpath = os.path.join(ninja_compile_dir, "build")
     os.makedirs(new_buildpath, exist_ok=True)
@@ -54,11 +46,16 @@ def chinese_path_compile_support(sources, buildpath):
 
 
 def load():
-    cc_flag = _get_runtime_cc_flag()
+    # Check if cuda 11 is installed for compute capability 8.0
+    cc_flag = []
+    _, bare_metal_major, _ = _get_cuda_bare_metal_version(cpp_extension.CUDA_HOME)
+    if int(bare_metal_major) >= 11:
+        cc_flag.append("-gencode")
+        cc_flag.append("arch=compute_80,code=sm_80")
 
     # Build path
     srcpath = pathlib.Path(__file__).parent.absolute()
-    buildpath = _get_cuda_cache_root() / "build"
+    buildpath = srcpath / "build"
     _create_build_dir(buildpath)
 
     # Helper function to build the kernels.
@@ -72,6 +69,8 @@ def load():
             ],
             extra_cuda_cflags=[
                 "-O3",
+                "-gencode",
+                "arch=compute_70,code=sm_70",
                 "--use_fast_math",
             ]
             + extra_cuda_flags
@@ -101,18 +100,6 @@ def load():
     return anti_alias_activation_cuda
 
 
-def _get_runtime_cc_flag():
-    if not torch.cuda.is_available():
-        return []
-
-    major, minor = torch.cuda.get_device_capability()
-    arch = f"{major}{minor}"
-    return [
-        "-gencode",
-        f"arch=compute_{arch},code=sm_{arch}",
-    ]
-
-
 def _get_cuda_bare_metal_version(cuda_dir):
     raw_output = subprocess.check_output(
         [cuda_dir + "/bin/nvcc", "-V"], universal_newlines=True
@@ -128,7 +115,7 @@ def _get_cuda_bare_metal_version(cuda_dir):
 
 def _create_build_dir(buildpath):
     try:
-        os.makedirs(buildpath, exist_ok=True)
+        os.mkdir(buildpath)
     except OSError:
         if not os.path.isdir(buildpath):
             print(f"Creation of the build directory {buildpath} failed")
