@@ -37,13 +37,13 @@ done
 
 # 设置标签和playbook
 PLAYBOOK="$ANSIBLE_DIR/site.yml"
-TAGS="docker"
+TAGS="docker,sync,ci,cd"
 if [ "$PUB_MODE" = true ]; then
   PLAYBOOK="packages/pub.yml"
   TAGS=""
   echo "发布 PyPI 包..."
 elif [ "$SWARM_MODE" = true ]; then
-  TAGS="swarm"
+  TAGS="swarm,sync,ci,cd"
   echo "部署 Swarm 服务..."
 else
   echo "部署 Docker 镜像..."
