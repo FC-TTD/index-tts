@@ -2,7 +2,7 @@
 - name: Publish to PyPI
   hosts: localhost
   roles: 
-  - role: /workspace/z/ansible/roles/pypi_pub
+  - role: /workspace/FC-TTD/z/ansible/roles/pypi_pub
     vars:
       pypi_pub_url: "https://devpi/root/ttd/"
       pypi_pub_verify_url: "https://pypi-server/root/ttd"
