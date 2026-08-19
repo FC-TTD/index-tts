@@ -110,7 +110,9 @@ def _complete_model_dir(path):
     (path / "qwen0.6bemo4-merge").mkdir()
 
 
-def test_generate_contract_defaults_language_and_maps_speed(monkeypatch, tmp_path):
+def test_generate_contract_defaults_language_and_preserves_speed_semantics(
+    monkeypatch, tmp_path
+):
     model_dir = tmp_path / "checkpoints"
     _complete_model_dir(model_dir)
     infer_calls = []
@@ -135,7 +137,42 @@ def test_generate_contract_defaults_language_and_maps_speed(monkeypatch, tmp_pat
     assert response.status_code == 200
     assert response.headers["content-type"] == "audio/wav"
     assert infer_calls[0]["lang"] == "ZH"
-    assert infer_calls[0]["duration_factor"] == 1.25
+    assert infer_calls[0]["duration_factor"] == 0.8
+
+
+def test_expected_duration_retries_in_the_converging_direction(
+    monkeypatch, tmp_path
+):
+    model_dir = tmp_path / "checkpoints"
+    _complete_model_dir(model_dir)
+    duration_factors = []
+
+    class FakeModel:
+        def infer(self, output_path, **kwargs):
+            duration_factor = kwargs["duration_factor"]
+            duration_factors.append(duration_factor)
+            sample_count = round(22050 * 4.0 * duration_factor)
+            sf.write(output_path, np.ones(sample_count, dtype=np.float32), 22050)
+            return output_path
+
+    manager = FakeManager(FakeModel())
+    monkeypatch.setattr(api, "create_tts_manager", lambda args: manager)
+    app = api.create_app(_args(model_dir))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/generate",
+            data={
+                "text": "hello",
+                "expected_duration": "2.0",
+                "remove_silence": "false",
+                "postprocess": "false",
+            },
+            files={"prompt_speech": ("voice.wav", b"RIFF", "audio/wav")},
+        )
+
+    assert response.status_code == 200
+    assert duration_factors == pytest.approx([1.0, 0.5])
 
 
 def test_generate_contract_accepts_language_without_renaming_fields(

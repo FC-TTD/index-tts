@@ -121,6 +121,11 @@ def normalize_language(language: str | None) -> str:
     return normalized
 
 
+def speed_to_duration_factor(speed: float) -> float:
+    value = float(speed)
+    return 1.0 / value if value > 0 else 1.0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="IndexTTS API")
     parser.add_argument(
@@ -404,7 +409,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         emo_text=emo_text,
                         use_random=bool(use_random),
                         interval_silence=int(interval_silence),
-                        duration_factor=float(current_speed),
+                        duration_factor=speed_to_duration_factor(current_speed),
                         verbose=args.verbose,
                         max_text_tokens_per_segment=int(max_text_tokens_per_sentence),
                         **kwargs,

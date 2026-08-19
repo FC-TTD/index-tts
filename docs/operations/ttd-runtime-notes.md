@@ -23,7 +23,9 @@ the archived 2.0 image together with the `checkpoints-v2` mount.
 `POST /generate` remains the stable provider contract. IndexTTS 2.5 adds the
 optional `language` form field with values `ZH`, `EN`, `JA`, `ES`, and `AR`;
 omitting it preserves the historical Chinese behavior. The provider translates
-the existing `speed` field to the 2.5 `duration_factor` runtime argument.
+the existing speed-factor contract to the inverse 2.5 `duration_factor`, so
+values above `1.0` remain faster and `expected_duration` retries converge in
+the same direction as the 2.0 API.
 
 ## Xique public ingress
 
