@@ -2,6 +2,7 @@
 """Real synthesis through both internal entrypoints; never log reference contents."""
 from pathlib import Path
 import json
+import hashlib
 import subprocess
 import tempfile
 import urllib.request
@@ -9,8 +10,21 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def reference_audio():
+    path = ROOT / 'examples/voice_01.wav'
+    data = path.read_bytes()
+    if data.startswith(b'version https://git-lfs.github.com/spec/v1'):
+        oid = data.decode().split('oid sha256:', 1)[1].splitlines()[0]
+        gitdir = Path(subprocess.check_output(['git', 'rev-parse', '--absolute-git-dir'], cwd=ROOT, text=True).strip())
+        path = gitdir / 'lfs/objects' / oid[:2] / oid[2:4] / oid
+        assert path.exists(), 'Fetch the repository reference audio LFS object before smoke'
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == oid, 'Reference audio hash mismatch'
+    subprocess.run(['ffprobe', '-v', 'error', str(path)], check=True)
+    return path
+
+
 def main():
-    subprocess.run(['ffprobe', '-v', 'error', str(ROOT / 'examples/voice_01.wav')], check=True)
+    reference = reference_audio()
     work = Path(tempfile.mkdtemp(prefix='index-fusion-smoke-'))
     records = []
     for name, url, extra in [
@@ -21,7 +35,7 @@ def main():
         audio = work / f'{name}.wav'
         subprocess.run(['curl', '--fail-with-body', '-sS', '--max-time', '300', '-o', str(audio),
                         '-F', 'text=这是模型服务收敛后的语音测试。',
-                        '-F', f'prompt_speech=@{ROOT / "examples/voice_01.wav"}',
+                        '-F', f'prompt_speech=@{reference};type=audio/wav;filename=reference.wav',
                         '-F', 'seed=0', '-F', 'num_beams=1', '-F', 'do_sample=false',
                         *extra, url], check=True)
         probe = json.loads(subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries',

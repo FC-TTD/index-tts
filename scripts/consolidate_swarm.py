@@ -174,7 +174,8 @@ def main():
     print(f'Prepared {commit}; rollback and evidence: {work}', flush=True)
     if not args.apply:
         return
-    subprocess.run(['ffprobe', '-v', 'error', str(ROOT / 'examples/voice_01.wav')], check=True)
+    from smoke_single_fusion import reference_audio
+    reference_audio()
     try:
         stage('switching_ingress')
         current = update((work / 'transition.yml').read_text(), metadata.get('Env', []), digest(before_text))
