@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
+    subprocess.run(['ffprobe', '-v', 'error', str(ROOT / 'examples/voice_01.wav')], check=True)
     work = Path(tempfile.mkdtemp(prefix='index-fusion-smoke-'))
     records = []
     for name, url, extra in [

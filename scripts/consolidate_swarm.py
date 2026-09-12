@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import time
 import urllib.request
+import urllib.error
 
 import yaml
 
@@ -91,7 +92,13 @@ def wait_route():
         with urllib.request.urlopen('http://ttd-server/caddy_api/config/', timeout=15) as response:
             upstreams = index_upstreams(json.load(response))
         if upstreams and set(upstreams) == {'index-tts_api-3.:8000'}:
-            return
+            try:
+                for url in ('http://index-api/health', 'http://xique/health'):
+                    with urllib.request.urlopen(url, timeout=15) as health:
+                        assert health.status == 200
+                return
+            except (urllib.error.URLError, TimeoutError):
+                pass
         time.sleep(2)
     raise RuntimeError('index-api has not converged to api-3; old services retained')
 
@@ -167,6 +174,7 @@ def main():
     print(f'Prepared {commit}; rollback and evidence: {work}', flush=True)
     if not args.apply:
         return
+    subprocess.run(['ffprobe', '-v', 'error', str(ROOT / 'examples/voice_01.wav')], check=True)
     try:
         stage('switching_ingress')
         current = update((work / 'transition.yml').read_text(), metadata.get('Env', []), digest(before_text))
