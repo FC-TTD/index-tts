@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+if [[ "${1:-}" == "consolidate" ]]; then
+  shift
+  exec python3 scripts/consolidate_swarm.py "$@"
+fi
+
 # 默认值
 DOCKER_MODE=false
 SWARM_MODE=false
