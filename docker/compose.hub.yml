@@ -1,3 +1,5 @@
+# Pre-cutover validation asset. Formal adoption must preserve the existing
+# business domain and API/UI paths; index-hub is not the final naming rule.
 name: index-hub
 services:
   runtime:
