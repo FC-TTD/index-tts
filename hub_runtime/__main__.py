@@ -7,6 +7,7 @@ from importlib.metadata import version
 from .adapter import load_model, completion, cleanup
 from .api import build_api
 from .startup import parse_args, validate_model_dir
+from .http_compat import preserve_business_routes
 
 
 def create_app(args=None):
@@ -26,11 +27,23 @@ def create_app(args=None):
         return build_demo(args, runtime)
 
     enabled = os.getenv("ENABLE_GRADIO_UI", "1").lower() in ("1", "true", "yes")
+    ui_path = os.getenv("GRADIO_MOUNT_PATH", "/__gradio__")
+    preserve_business_routes(
+        app,
+        runtime,
+        ui_path=ui_path,
+        allowed_hosts={
+            host.strip().lower()
+            for host in os.getenv("GRADIO_ALLOWED_HOSTS", "").split(",")
+            if host.strip()
+        },
+        ui_enabled=enabled,
+    )
     return attach(
         app,
         runtime=runtime,
         ui_factory=ui_factory if enabled else None,
-        ui_path=os.getenv("GRADIO_MOUNT_PATH", "/__gradio__"),
+        ui_path=ui_path,
     )
 
 
