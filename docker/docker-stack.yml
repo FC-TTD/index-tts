@@ -1,55 +1,153 @@
-# Single IndexTTS API + WebUI instance. Deploy through ./deploy.sh consolidate.
-version: '3.8'
+version: "3.8"
+
 services:
-  api-3:
-    image: registry.ttd/index-tts/api:h-54be7b525694@sha256:7f3309bdacda8424cefb094cf09bee6f2b4499db1174bfa33da1b98378a3176a
+
+  api-1:
+    image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}
     environment:
-    - TZ=Asia/Shanghai
-    - NVIDIA_VISIBLE_DEVICES=1
-    - HF_HOME=/opt/hf_cache
-    - HF_HUB_CACHE=/opt/hf_cache/hub
-    - TRANSFORMERS_CACHE=/opt/hf_cache/transformers
-    - MODELSCOPE_CACHE=/opt/hf_cache/modelscope
-    - HF_HUB_DISABLE_XET=1
-    - INDEXTTS_HF_LOCAL_ONLY=true
-    - TORCH_EXTENSIONS_DIR=/opt/torch_extensions/ttd-worker-api-3
-    - TORCHINDUCTOR_CACHE_DIR=/opt/torchinductor/ttd-worker-api-3
-    - ENABLE_GRADIO_UI=true
-    - GRADIO_MOUNT_PATH=/__gradio__
-    - GRADIO_ALLOWED_HOSTS=xique,xique-tts.api.ttd.honeywave.net
-    - APP_IMAGE=registry.ttd/index-tts/api
-    - APP_IMAGE_TAG=h-54be7b525694
-    - APP_CONTENT_HASH=h-54be7b525694
-    - APP_GIT_COMMIT=738560d
-    - BUILD_COMMIT=738560d
-    - BUILD_TIME=
+      - TZ=Asia/Shanghai
+      - NVIDIA_VISIBLE_DEVICES=0
+      - HF_HOME=/opt/hf_cache
+      - HF_HUB_CACHE=/opt/hf_cache/hub
+      - TRANSFORMERS_CACHE=/opt/hf_cache/transformers
+      - MODELSCOPE_CACHE=/opt/hf_cache/modelscope
+      - HF_HUB_DISABLE_XET=1
+      - INDEXTTS_HF_LOCAL_ONLY=true
+      - TORCH_EXTENSIONS_DIR=/opt/torch_extensions/ttd-worker-api-1
+      - TORCHINDUCTOR_CACHE_DIR=/opt/torchinductor/ttd-worker-api-1
+      - ENABLE_GRADIO_UI=false
     volumes:
-    - /TTD-Data/index-tts/checkpoints-v25:/app/checkpoints
-    - /TTD-Data/index-tts/hf-cache:/opt/hf_cache
-    - /TTD-Data/index-tts/hf-cache:/app/checkpoints/hf_cache
-    - /TTD-Data/index-tts/torch-extensions:/opt/torch_extensions
-    - /TTD-Data/index-tts/torchinductor:/opt/torchinductor
+      - /TTD-Data/index-tts/checkpoints-v25:/app/checkpoints
+      - /TTD-Data/index-tts/hf-cache:/opt/hf_cache
+      - /TTD-Data/index-tts/hf-cache:/app/checkpoints/hf_cache
+      - /TTD-Data/index-tts/torch-extensions:/opt/torch_extensions
+      - /TTD-Data/index-tts/torchinductor:/opt/torchinductor
     networks:
-    - caddy
+      - caddy
     deploy:
       mode: replicated
       replicas: 1
       endpoint_mode: dnsrr
       placement:
         constraints:
-        - node.hostname == ttd-worker
+          - node.hostname == ttd-worker
       update_config:
         parallelism: 0
         delay: 0s
         failure_action: pause
-        order: stop-first
+        order: stop-first  # 关键：先停止再启动
+      restart_policy:
+        condition: any
+        max_attempts: 10
+        delay: 10s
+      labels:
+        caddy: http://index-api
+        # 匹配 Header: X-LB-Mode: Premium → 启动主力优先模式
+        caddy.@premium: "header X-LB-Mode *Premium*"
+        # ===== 主力优先逻辑 =====
+        caddy.handle: "@premium"
+        caddy.handle.1_reverse_proxy: "index-tts_api-1:8000 index-tts_api-2:8000 index-tts_api-3:8000"
+        caddy.handle.1_reverse_proxy.lb_policy: random
+        caddy.handle.1_reverse_proxy.lb_try_duration: 5s
+        caddy.handle.1_reverse_proxy.lb_try_interval: 250ms
+        caddy.handle.1_reverse_proxy.health_uri: /health
+        caddy.handle.1_reverse_proxy.health_interval: 10s
+        caddy.handle.1_reverse_proxy.health_timeout: 2s
+        caddy.handle.1_reverse_proxy.health_fails: 1
+        caddy.handle.1_reverse_proxy.health_passes: 1
+        caddy.handle.1_reverse_proxy.health_status: 200
+        # ===== 默认逻辑：4 节点随机负载 =====
+        caddy.reverse_proxy: "index-tts_api-1:8000 index-tts_api-2:8000 index-tts_api-3:8000"
+        caddy.reverse_proxy.lb_policy: random
+        caddy.reverse_proxy.health_uri: /health
+        caddy.reverse_proxy.health_interval: 10s
+        caddy.reverse_proxy.health_timeout: 2s
+        caddy.reverse_proxy.health_fails: 1
+        caddy.reverse_proxy.health_passes: 1
+        caddy.reverse_proxy.health_status: 200
+
+  api-2:
+    image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}
+    environment:
+      - TZ=Asia/Shanghai
+      - NVIDIA_VISIBLE_DEVICES=2
+      - HF_HOME=/opt/hf_cache
+      - HF_HUB_CACHE=/opt/hf_cache/hub
+      - TRANSFORMERS_CACHE=/opt/hf_cache/transformers
+      - MODELSCOPE_CACHE=/opt/hf_cache/modelscope
+      - HF_HUB_DISABLE_XET=1
+      - INDEXTTS_HF_LOCAL_ONLY=true
+      - TORCH_EXTENSIONS_DIR=/opt/torch_extensions/ttd-worker-api-2
+      - TORCHINDUCTOR_CACHE_DIR=/opt/torchinductor/ttd-worker-api-2
+      - ENABLE_GRADIO_UI=false
+    volumes:
+      - /TTD-Data/index-tts/checkpoints-v25:/app/checkpoints
+      - /TTD-Data/index-tts/hf-cache:/opt/hf_cache
+      - /TTD-Data/index-tts/hf-cache:/app/checkpoints/hf_cache
+      - /TTD-Data/index-tts/torch-extensions:/opt/torch_extensions
+      - /TTD-Data/index-tts/torchinductor:/opt/torchinductor
+    networks:
+      - caddy
+    deploy:
+      mode: replicated
+      replicas: 1
+      endpoint_mode: dnsrr
+      placement:
+        constraints:
+          - node.hostname == ttd-worker
+      update_config:
+        parallelism: 0
+        delay: 0s
+        failure_action: pause
+        order: stop-first  # 关键：先停止再启动
+      restart_policy:
+        condition: any
+        max_attempts: 10
+        delay: 10s
+
+  api-3:
+    image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}
+    environment:
+      - TZ=Asia/Shanghai
+      - NVIDIA_VISIBLE_DEVICES=1
+      - HF_HOME=/opt/hf_cache
+      - HF_HUB_CACHE=/opt/hf_cache/hub
+      - TRANSFORMERS_CACHE=/opt/hf_cache/transformers
+      - MODELSCOPE_CACHE=/opt/hf_cache/modelscope
+      - HF_HUB_DISABLE_XET=1
+      - INDEXTTS_HF_LOCAL_ONLY=true
+      - TORCH_EXTENSIONS_DIR=/opt/torch_extensions/ttd-worker-api-3
+      - TORCHINDUCTOR_CACHE_DIR=/opt/torchinductor/ttd-worker-api-3
+      - ENABLE_GRADIO_UI=true
+      - GRADIO_MOUNT_PATH=/__gradio__
+      - GRADIO_ALLOWED_HOSTS=xique,xique-tts.api.ttd.honeywave.net
+    volumes:
+      - /TTD-Data/index-tts/checkpoints-v25:/app/checkpoints
+      - /TTD-Data/index-tts/hf-cache:/opt/hf_cache
+      - /TTD-Data/index-tts/hf-cache:/app/checkpoints/hf_cache
+      - /TTD-Data/index-tts/torch-extensions:/opt/torch_extensions
+      - /TTD-Data/index-tts/torchinductor:/opt/torchinductor
+    networks:
+      - caddy
+    deploy:
+      mode: replicated
+      replicas: 1
+      endpoint_mode: dnsrr
+      placement:
+        constraints:
+          - node.hostname == ttd-worker
+      update_config:
+        parallelism: 0
+        delay: 0s
+        failure_action: pause
+        order: stop-first  # 关键：先停止再启动
       restart_policy:
         condition: any
         max_attempts: 10
         delay: 10s
       labels:
         caddy_1: http://xique
-        caddy_1.reverse_proxy: index-tts_api-3.:8000
+        caddy_1.reverse_proxy: "index-tts_api-3:8000"
         caddy_1.reverse_proxy.health_uri: /health
         caddy_1.reverse_proxy.health_interval: 10s
         caddy_1.reverse_proxy.health_timeout: 2s
@@ -57,27 +155,44 @@ services:
         caddy_1.reverse_proxy.health_passes: 1
         caddy_1.reverse_proxy.health_status: 200
         caddy_2: http://xique-tts-public-proxy
-        caddy_2.reverse_proxy: index-tts_api-3.:8000
-        caddy_2.reverse_proxy.header_up: Host xique-tts.api.ttd.honeywave.net
-        caddy_2.reverse_proxy.header_up_1: X-Forwarded-Host xique-tts.api.ttd.honeywave.net
-        caddy_2.reverse_proxy.header_up_2: X-Forwarded-Proto https
-        caddy_2.reverse_proxy.header_up_3: X-Forwarded-Port 443
+        caddy_2.reverse_proxy: "index-tts_api-3:8000"
+        caddy_2.reverse_proxy.header_up: "Host xique-tts.api.ttd.honeywave.net"
+        caddy_2.reverse_proxy.header_up_1: "X-Forwarded-Host xique-tts.api.ttd.honeywave.net"
+        caddy_2.reverse_proxy.header_up_2: "X-Forwarded-Proto https"
+        caddy_2.reverse_proxy.header_up_3: "X-Forwarded-Port 443"
         caddy_2.reverse_proxy.health_uri: /health
         caddy_2.reverse_proxy.health_interval: 10s
         caddy_2.reverse_proxy.health_timeout: 2s
         caddy_2.reverse_proxy.health_fails: 1
         caddy_2.reverse_proxy.health_passes: 1
         caddy_2.reverse_proxy.health_status: 200
-        caddy_0: http://index-api
-        caddy_0.reverse_proxy: index-tts_api-3.:8000
-        caddy_0.reverse_proxy.health_uri: /health
-        caddy_0.reverse_proxy.health_interval: 10s
-        caddy_0.reverse_proxy.health_timeout: 2s
-        caddy_0.reverse_proxy.health_fails: '1'
-        caddy_0.reverse_proxy.health_passes: '1'
-        caddy_0.reverse_proxy.health_status: '200'
-    labels:
-      io.portainer.accesscontrol.public: null
+
+  # api-4:
+  #   image: registry.ttd/index-tts/api:${IMAGE_TAG:-latest}
+  #   environment:
+  #     - TZ=Asia/Shanghai
+  #     - NVIDIA_VISIBLE_DEVICES=2
+  #   volumes:
+  #     - /TTD-Data/index-tts/checkpoints-v25:/app/checkpoints
+  #   networks:
+  #     - caddy
+  #   deploy:
+  #     mode: replicated
+  #     replicas: 1
+  #     endpoint_mode: dnsrr
+  #     placement:
+  #       constraints:
+  #         - node.hostname == ttd-worker
+  #     update_config:
+  #       parallelism: 0
+  #       delay: 0s
+  #       failure_action: pause
+  #       order: stop-first  # 关键：先停止再启动
+  #     restart_policy:
+  #       condition: any
+  #       max_attempts: 10
+  #       delay: 10s
+
 networks:
   caddy:
     external: true
