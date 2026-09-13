@@ -4,6 +4,7 @@ This entry uses the shared `ttd-model-runtime` SDK for lifecycle, private contro
 
 - `__main__.py`: assembles API and the copied Gradio UI with one Runtime.
 - `startup.py`: shared container startup arguments, cache paths and weight-file validation; no separate CLI client or model lifecycle manager.
+- `http_compat.py`: preserves the API JSON home and the existing UI host/path aliases, without changing callers' URLs.
 - `adapter.py`: native model constructor, model-local inference lock, completion/cache hooks and UI input mapping. The official device map and precision choices are retained.
 - `service.py`: shared existing API inference/postprocessing pipeline. Both API and UI call it.
 - `api.py`: existing multipart API contract registered on the foundation.
@@ -28,3 +29,7 @@ Tests use real FastAPI/Gradio and audio libraries with a fake inference model. T
 The old ttd-fastapi-utils subtree is retained for callers not yet migrated; this new entry does not import it. Existing fusion deployment assets remain available until an explicit rollout switches the service.
 
 `index-hub` in the current Compose asset is an auxiliary address for validation before cutover. Formal adoption must take over the existing business domain and preserve its API/UI URLs so callers do not change addresses. The cutover changes Caddy's backend, not the public URL; rollback preserves that same URL. A redirect to a new `-hub` domain is not a substitute. Acceptance through the existing business URL and its callers is still pending.
+
+`docker/compose.hub-business.yml` prepares the original `index-api`, `xique` and `xique-tts-public-proxy` routes. It replaces the auxiliary route labels and preserves the existing public Host/HTTPS headers. It requires a Hub image with `model-entry --public-origin` support and the SDK Gradio mount-prefix fix. Runtime port 8000 remains private to the model network; proxy header trust is enabled only in this overlay for the CPU entry hop. This overlay has been validated, not deployed; the current Hub fresh-release installer cannot perform the old Swarm actor/route handoff. Do not layer it onto the live service before that handoff is complete.
+
+Expanded tests use the real `create_app` entry and native Gradio under both the internal UI Host and the existing public Host/HTTPS scheme. They check API JSON versus UI home behavior, original root-path upload/queue aliases, the `/__gradio__` config prefix, generated download origins and actual file retrieval. Model inference remains a fixture, not GPU acceptance.

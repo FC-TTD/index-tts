@@ -206,7 +206,16 @@ if __name__ == "__main__":
 
 class OriginalUI(unittest.TestCase):
     def test_original_gradio_generation_callback_uses_shared_runtime(self):
-        from hub_runtime.ui import build_demo
+        self._exercise_business_origin("http://xique", "http")
+
+    def test_public_ui_preserves_https_upload_queue_and_download(self):
+        self._exercise_business_origin(
+            "http://xique-tts.api.ttd.honeywave.net", "https"
+        )
+
+    def _exercise_business_origin(self, origin, scheme):
+        from hub_runtime.__main__ import create_app
+        from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
         from hub_runtime.startup import build_parser
         from unittest.mock import patch
 
@@ -234,20 +243,51 @@ class OriginalUI(unittest.TestCase):
                 token="t" * 32,
                 state_dir=Path(directory) / "state",
             )
-            app = attach(
-                build_api(args, runtime),
-                runtime=runtime,
-                ui_factory=lambda: build_demo(args, runtime),
-            )
+            with (
+                patch("ttd_model_runtime.Runtime", return_value=runtime),
+                patch.dict(
+                    os.environ,
+                    {
+                        "ENABLE_GRADIO_UI": "1",
+                        "GRADIO_MOUNT_PATH": "/__gradio__",
+                        "GRADIO_ALLOWED_HOSTS": "xique,xique-tts.api.ttd.honeywave.net",
+                    },
+                ),
+            ):
+                app = create_app(args)
+            # Equivalent to the private model-network proxy trust in the overlay.
+            app = ProxyHeadersMiddleware(app, trusted_hosts="*")
             old = os.getcwd()
             os.chdir(directory)
             try:
                 with (
                     patch.dict(os.environ, {"GRADIO_ANALYTICS_ENABLED": "False"}),
-                    TestClient(app) as client,
+                    TestClient(
+                        app, base_url=origin, headers={"X-Forwarded-Proto": scheme}
+                    ) as client,
                 ):
+                    home = client.get("/", follow_redirects=False)
+                    self.assertEqual(home.status_code, 200, home.text)
+                    self.assertIn("text/html", home.headers["content-type"])
+                    api_home = client.get(
+                        "/", headers={"Host": "index-api"}, follow_redirects=False
+                    )
+                    self.assertEqual(api_home.status_code, 200, api_home.text)
+                    api_head = client.head("/", headers={"Host": "index-api"})
+                    self.assertEqual(api_head.status_code, 200)
+                    self.assertEqual(api_head.content, b"")
+                    self.assertEqual(
+                        set(api_home.json()),
+                        {"app", "build", "container", "message", "status"},
+                    )
+                    self.assertEqual(model.calls, [])
+                    self.assertEqual(runtime.status()["residency"], "unloaded")
                     runtime.load(LEASE)
                     config = client.get("/__gradio__/config").json()
+                    expected_root = (
+                        origin.replace("http://", scheme + "://") + "/__gradio__"
+                    )
+                    self.assertEqual(config["root"], expected_root)
                     dep = next(
                         x
                         for x in config["dependencies"]
@@ -262,7 +302,7 @@ class OriginalUI(unittest.TestCase):
                         format="WAV",
                     )
                     uploaded = client.post(
-                        "/__gradio__/gradio_api/upload",
+                        "/gradio_api/upload",
                         files={
                             "files": ("reference.wav", audio.getvalue(), "audio/wav")
                         },
@@ -282,14 +322,30 @@ class OriginalUI(unittest.TestCase):
                             value = "你好"
                         values.append(value)
                     queued = client.post(
-                        "/__gradio__/gradio_api/call/gen_single", json={"data": values}
+                        "/gradio_api/call/gen_single", json={"data": values}
                     )
                     self.assertEqual(queued.status_code, 200, queued.text)
                     result = client.get(
-                        "/__gradio__/gradio_api/call/gen_single/"
-                        + queued.json()["event_id"]
+                        "/gradio_api/call/gen_single/" + queued.json()["event_id"]
                     )
                     self.assertIn("event: complete", result.text, result.text)
+                    import json
+                    from urllib.parse import urlparse
+
+                    payload = json.loads(
+                        next(
+                            line[6:]
+                            for line in result.text.splitlines()
+                            if line.startswith("data: ")
+                        )
+                    )
+                    download_url = payload[0]["value"]["url"]
+                    self.assertTrue(
+                        download_url.startswith(expected_root + "/"), download_url
+                    )
+                    downloaded = client.get(urlparse(download_url).path)
+                    self.assertEqual(downloaded.status_code, 200, downloaded.text[:100])
+                    self.assertGreater(len(downloaded.content), 44)
                     self.assertEqual(node.ends, ["succeeded"])
                     self.assertEqual(model.calls[0]["emo_alpha"], DEFAULTS["emo_alpha"])
                     self.assertTrue(list((Path(directory) / "outputs").glob("*.wav")))
