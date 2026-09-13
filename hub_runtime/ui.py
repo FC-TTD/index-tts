@@ -1,5 +1,4 @@
 # UI source: FC-TTD/index-tts api b91f4a4, webui.py; layout retained.
-import atexit
 import argparse
 import html
 import json
@@ -22,85 +21,12 @@ if indextts_dir not in sys.path:
 
 import gradio as gr
 
-from download_filename import build_download_filename
 from tools.i18n.i18n import I18nAuto
 
 from .parameters import DEFAULTS
+from .startup import validate_model_dir
 from .adapter import generate_ui
 from ttd_model_runtime.integrations.gradio import task
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="IndexTTS WebUI",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument(
-        "--verbose", action="store_true", default=False, help="Enable verbose mode"
-    )
-    parser.add_argument(
-        "--port", type=int, default=7860, help="Port to run the web UI on"
-    )
-    parser.add_argument(
-        "--host", type=str, default="0.0.0.0", help="Host to run the web UI on"
-    )
-    parser.add_argument(
-        "--model_dir",
-        type=str,
-        default="./checkpoints",
-        help="Model checkpoints directory",
-    )
-    parser.add_argument(
-        "--bf16",
-        action="store_true",
-        default=False,
-        help="Use BF16 for inference if available",
-    )
-    parser.add_argument(
-        "--deepspeed",
-        action="store_true",
-        default=False,
-        help="Use DeepSpeed to accelerate if available",
-    )
-    parser.add_argument(
-        "--cuda_kernel",
-        action="store_true",
-        default=False,
-        help="Use CUDA kernel for inference if available",
-    )
-    parser.add_argument(
-        "--gui_seg_tokens",
-        type=int,
-        default=120,
-        help="GUI: Max tokens per generation segment",
-    )
-    return parser
-
-
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    return build_parser().parse_args(argv)
-
-
-def validate_model_dir(model_dir: str) -> None:
-    if not os.path.exists(model_dir):
-        raise FileNotFoundError(
-            f"Model directory {model_dir} does not exist. Please download the model first."
-        )
-
-    for file_name in [
-        "gpt.pth",
-        "config.yaml",
-        "s2mel.pth",
-        "codec.pth",
-        "multilingual_zh_ja_yue_char_del.tiktoken",
-        "wav2vec2bert_stats.pt",
-        "qwen0.6bemo4-merge",
-    ]:
-        file_path = os.path.join(model_dir, file_name)
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(
-                f"Required file {file_path} does not exist. Please download it."
-            )
 
 
 i18n = I18nAuto(language="zh_CN")

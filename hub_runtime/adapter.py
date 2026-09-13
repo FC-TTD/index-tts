@@ -11,7 +11,7 @@ from functools import wraps
 from fastapi import UploadFile
 from download_filename import build_download_filename
 from .parameters import DEFAULTS
-from .cli import _ensure_runtime_cache_env
+from .startup import _ensure_runtime_cache_env
 
 _progress = ContextVar("index_gradio_progress", default=None)
 

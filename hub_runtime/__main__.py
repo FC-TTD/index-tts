@@ -6,7 +6,7 @@ import json
 from importlib.metadata import version
 from .adapter import load_model, completion, cleanup
 from .api import build_api
-from .cli import parse_args, validate_model_dir
+from .startup import parse_args, validate_model_dir
 
 
 def create_app(args=None):
