@@ -1,3 +1,4 @@
+# UI source: FC-TTD/index-tts api b91f4a4, webui.py; layout retained.
 import atexit
 import argparse
 import html
@@ -12,7 +13,7 @@ import pandas as pd
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
+current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 indextts_dir = os.path.join(current_dir, "indextts")
@@ -22,13 +23,11 @@ if indextts_dir not in sys.path:
 import gradio as gr
 
 from download_filename import build_download_filename
-from indextts.infer_v2_5 import IndexTTS2
 from tools.i18n.i18n import I18nAuto
 
-try:
-    from ttd_fastapi_utils import SmartModel
-except ImportError:
-    from packages.ttd_fastapi_utils.src.ttd_fastapi_utils import SmartModel
+from .parameters import DEFAULTS
+from .adapter import generate_ui
+from ttd_model_runtime.integrations.gradio import task
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -201,11 +200,7 @@ def get_example_cases(
     return [x for x in example_cases if x[1] != EMO_CHOICES_ALL[3]]
 
 
-def build_demo(
-    args: argparse.Namespace,
-    tts_manager: SmartModel | None = None,
-    tts_manager_getter=None,
-) -> gr.Blocks:
+def build_demo(args: argparse.Namespace, runtime) -> gr.Blocks:
     validate_model_dir(args.model_dir)
     gui_seg_tokens = int(getattr(args, "gui_seg_tokens", 120))
     verbose = bool(getattr(args, "verbose", False))
@@ -214,35 +209,8 @@ def build_demo(
         getattr(args, "cuda_kernel", getattr(args, "use_cuda_kernel", False))
     )
 
-    created_manager = False
-    allow_lazy_boot = tts_manager is None and tts_manager_getter is not None
-    if tts_manager is None and tts_manager_getter is None:
-        created_manager = True
-
-        def tts_loader():
-            return IndexTTS2(
-                model_dir=args.model_dir,
-                cfg_path=os.path.join(args.model_dir, "config.yaml"),
-                use_bf16=bool(getattr(args, "bf16", False)),
-                use_deepspeed=deepspeed,
-                use_cuda_kernel=cuda_kernel,
-                use_qwen_emo=True,
-            )
-
-        tts_manager = SmartModel(tts_loader, timeout_seconds=7200)
-
-    if tts_manager_getter is None:
-
-        def get_created_manager():
-            return tts_manager
-
-        tts_manager_getter = get_created_manager
-
     def get_tts():
-        manager = tts_manager_getter()
-        if manager is None:
-            raise RuntimeError("TTS manager is not ready yet")
-        return manager.get()
+        return runtime.get()
 
     def get_normalizer(tts):
         return getattr(tts, "normalizer", None) or getattr(tts, "text_process", None)
@@ -251,35 +219,11 @@ def build_demo(
     glossary_enabled = False
     max_mel_tokens_limit = 1500
     max_text_tokens_limit = max(120, gui_seg_tokens)
-    if not allow_lazy_boot:
-        boot_tts = get_tts()
-        model_version = boot_tts.model_version or "1.0"
-        normalizer = get_normalizer(boot_tts)
-        glossary_enabled = bool(normalizer is not None and normalizer.enable_glossary)
-        max_mel_tokens_limit = int(
-            getattr(boot_tts.cfg.gpt, "max_mel_tokens", max_mel_tokens_limit)
-        )
-        max_text_tokens_limit = int(
-            getattr(boot_tts.cfg.gpt, "max_text_tokens", max_text_tokens_limit)
-        )
-        del boot_tts
-        if created_manager:
-            tts_manager.unload()
-
-    def cleanup_manager():
-        if created_manager:
-            try:
-                tts_manager.unload()
-            finally:
-                tts_manager.stop()
-
-    if created_manager:
-        atexit.register(cleanup_manager)
-
     os.makedirs("outputs/tasks", exist_ok=True)
     os.makedirs("prompts", exist_ok=True)
     example_cases = _default_examples()
 
+    @task(runtime)
     def format_glossary_markdown():
         tts = get_tts()
         normalizer = get_normalizer(tts)
@@ -312,6 +256,7 @@ def build_demo(
     with gr.Blocks(title="IndexTTS Demo") as demo:
         mutex = threading.Lock()
 
+        @task(runtime)
         def gen_single(
             emo_control_method,
             prompt,
@@ -333,64 +278,13 @@ def build_demo(
             *advanced_args,
             progress=gr.Progress(),
         ):
-            tts = get_tts()
-            prompt_orig_name = _audio_orig_name(prompt)
-            emo_orig_name = _audio_orig_name(emo_ref_path)
-            prompt_path = _audio_path(prompt)
-            emo_ref_path = _audio_path(emo_ref_path)
-            source_name = prompt_orig_name or emo_orig_name or "source"
-            output_path = os.path.join(
-                "outputs", build_download_filename(source_name, text)
+            output = generate_ui(
+                runtime, args, emo_control_method, _audio_path(prompt),
+                _audio_orig_name(prompt), text, language, _audio_path(emo_ref_path),
+                emo_weight, [vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8],
+                emo_text, emo_random, max_text_tokens_per_segment,
+                advanced_args, progress,
             )
-            tts.gr_progress = progress
-            (
-                do_sample,
-                top_p,
-                top_k,
-                temperature,
-                length_penalty,
-                num_beams,
-                repetition_penalty,
-                max_mel_tokens,
-            ) = advanced_args
-            kwargs = {
-                "do_sample": bool(do_sample),
-                "top_p": float(top_p),
-                "top_k": int(top_k) if int(top_k) > 0 else None,
-                "temperature": float(temperature),
-                "length_penalty": float(length_penalty),
-                "num_beams": num_beams,
-                "repetition_penalty": float(repetition_penalty),
-                "max_mel_tokens": int(max_mel_tokens),
-            }
-            if type(emo_control_method) is not int:
-                emo_control_method = emo_control_method.value
-            if emo_control_method == 0:
-                emo_ref_path = None
-            if emo_control_method == 2:
-                vec = [vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8]
-                vec = tts.normalize_emo_vec(vec, apply_bias=True)
-            else:
-                vec = None
-            if emo_text == "":
-                emo_text = None
-
-            with mutex:
-                output = tts.infer(
-                    spk_audio_prompt=prompt_path,
-                    text=text,
-                    output_path=output_path,
-                    lang=language,
-                    emo_audio_prompt=emo_ref_path,
-                    emo_alpha=emo_weight,
-                    emo_vector=vec,
-                    use_emo_text=(emo_control_method == 3),
-                    emo_text=emo_text,
-                    use_random=emo_random,
-                    verbose=verbose,
-                    max_text_tokens_per_segment=int(max_text_tokens_per_segment),
-                    **kwargs,
-                )
             return gr.update(value=output, visible=True)
 
         gr.HTML(
@@ -419,7 +313,7 @@ def build_demo(
                     )
                     language = gr.Dropdown(
                         choices=["ZH", "EN", "JA", "ES", "AR"],
-                        value="ZH",
+                        value=DEFAULTS['language'],
                         label=i18n("语言"),
                     )
                     gen_button = gr.Button(
@@ -459,7 +353,7 @@ def build_demo(
                     )
 
             with gr.Row(visible=False) as emotion_randomize_group:
-                emo_random = gr.Checkbox(label=i18n("情感随机采样"), value=False)
+                emo_random = gr.Checkbox(label=i18n("情感随机采样"), value=DEFAULTS['use_random'])
 
             with gr.Group(visible=False) as emotion_vector_group:
                 with gr.Row():
@@ -539,7 +433,7 @@ def build_demo(
                     label=i18n("情感权重"),
                     minimum=0.0,
                     maximum=1.0,
-                    value=0.65,
+                    value=DEFAULTS['emo_alpha'],
                     step=0.01,
                 )
 
@@ -570,13 +464,13 @@ def build_demo(
                         )
                         with gr.Row():
                             do_sample = gr.Checkbox(
-                                label="do_sample", value=True, info=i18n("是否进行采样")
+                                label="do_sample", value=DEFAULTS['do_sample'], info=i18n("是否进行采样")
                             )
                             temperature = gr.Slider(
                                 label="temperature",
                                 minimum=0.1,
                                 maximum=2.0,
-                                value=0.8,
+                                value=DEFAULTS['temperature'],
                                 step=0.1,
                             )
                         with gr.Row():
@@ -584,15 +478,15 @@ def build_demo(
                                 label="top_p",
                                 minimum=0.0,
                                 maximum=1.0,
-                                value=0.8,
+                                value=DEFAULTS['top_p'],
                                 step=0.01,
                             )
                             top_k = gr.Slider(
-                                label="top_k", minimum=0, maximum=100, value=30, step=1
+                                label="top_k", minimum=0, maximum=100, value=DEFAULTS['top_k'], step=1
                             )
                             num_beams = gr.Slider(
                                 label="num_beams",
-                                value=3,
+                                value=DEFAULTS['num_beams'],
                                 minimum=1,
                                 maximum=10,
                                 step=1,
@@ -601,7 +495,7 @@ def build_demo(
                             repetition_penalty = gr.Number(
                                 label="repetition_penalty",
                                 precision=None,
-                                value=10.0,
+                                value=DEFAULTS['repetition_penalty'],
                                 minimum=0.1,
                                 maximum=20.0,
                                 step=0.1,
@@ -609,14 +503,14 @@ def build_demo(
                             length_penalty = gr.Number(
                                 label="length_penalty",
                                 precision=None,
-                                value=0.0,
+                                value=DEFAULTS['length_penalty'],
                                 minimum=-2.0,
                                 maximum=2.0,
                                 step=0.1,
                             )
                         max_mel_tokens = gr.Slider(
                             label="max_mel_tokens",
-                            value=1500,
+                            value=DEFAULTS['max_mel_tokens'],
                             minimum=50,
                             maximum=max_mel_tokens_limit,
                             step=10,
@@ -633,7 +527,7 @@ def build_demo(
                             )
                             max_text_tokens_per_segment = gr.Slider(
                                 label=i18n("分句最大Token数"),
-                                value=initial_value,
+                                value=DEFAULTS['max_text_tokens_per_sentence'],
                                 minimum=20,
                                 maximum=max_text_tokens_limit,
                                 step=2,
@@ -690,6 +584,7 @@ def build_demo(
         def on_example_click(example):
             return tuple(gr.update(value=example[idx]) for idx in range(14))
 
+        @task(runtime)
         def on_input_text_change(text, language, max_text_tokens_per_segment):
             tts = get_tts()
             if text and len(text) > 0:
@@ -716,6 +611,7 @@ def build_demo(
             )
             return {segments_preview: gr.update(value=df)}
 
+        @task(runtime)
         def on_add_glossary_term(term, reading_zh, reading_en):
             tts = get_tts()
             normalizer = get_normalizer(tts)
@@ -796,6 +692,7 @@ def build_demo(
                 )
             )
 
+        @task(runtime)
         def on_glossary_checkbox_change(is_enabled):
             tts = get_tts()
             normalizer = get_normalizer(tts)
@@ -804,6 +701,7 @@ def build_demo(
             normalizer.enable_glossary = is_enabled
             return gr.update(visible=is_enabled)
 
+        @task(runtime)
         def on_demo_load():
             tts = get_tts()
             normalizer = get_normalizer(tts)
@@ -908,7 +806,3 @@ def build_demo(
     return demo
 
 
-if __name__ == "__main__":
-    cli_args = parse_args()
-    demo = build_demo(cli_args)
-    demo.launch(server_name=cli_args.host, server_port=cli_args.port)

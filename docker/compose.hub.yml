@@ -4,9 +4,8 @@ services:
     image: ${INDEX_IMAGE:?immutable INDEX_IMAGE required}
     container_name: index-hub-runtime
     restart: "no"
-    command: [python, entry.py, --model_dir, /app/checkpoints, --host, '0.0.0.0', --port, '8000', --bf16, --device, 'cuda:0']
+    command: [python, -m, hub_runtime, --model_dir, /app/checkpoints, --host, '0.0.0.0', --port, '8000', --bf16, --device, 'cuda:0']
     environment:
-      HUB_RUNTIME_ENABLED: '1'
       HUB_SERVICE_ID: index-hub
       HUB_RUNTIME_VERSION: ${INDEX_RUNTIME_VERSION:?}
       HUB_NODE_URL: http://host.docker.internal:13912
