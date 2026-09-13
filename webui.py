@@ -7,6 +7,13 @@ import sys
 import threading
 import warnings
 
+from hub_adapter import (
+    create_managed_model,
+    managed_call,
+    managed_cuda_device,
+    managed_enabled,
+)
+
 import pandas as pd
 
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -227,9 +234,14 @@ def build_demo(
                 use_deepspeed=deepspeed,
                 use_cuda_kernel=cuda_kernel,
                 use_qwen_emo=True,
+                **({"device": managed_cuda_device()} if managed_enabled() else {}),
             )
 
-        tts_manager = SmartModel(tts_loader, timeout_seconds=7200)
+        tts_manager = (
+            create_managed_model(tts_loader)
+            if managed_enabled()
+            else SmartModel(tts_loader, timeout_seconds=7200)
+        )
 
     if tts_manager_getter is None:
 
@@ -251,7 +263,7 @@ def build_demo(
     glossary_enabled = False
     max_mel_tokens_limit = 1500
     max_text_tokens_limit = max(120, gui_seg_tokens)
-    if not allow_lazy_boot:
+    if not allow_lazy_boot and not managed_enabled():
         boot_tts = get_tts()
         model_version = boot_tts.model_version or "1.0"
         normalizer = get_normalizer(boot_tts)
@@ -269,7 +281,8 @@ def build_demo(
     def cleanup_manager():
         if created_manager:
             try:
-                tts_manager.unload()
+                if not managed_enabled():
+                    tts_manager.unload()
             finally:
                 tts_manager.stop()
 
@@ -280,6 +293,7 @@ def build_demo(
     os.makedirs("prompts", exist_ok=True)
     example_cases = _default_examples()
 
+    @managed_call(lambda: tts_manager_getter())
     def format_glossary_markdown():
         tts = get_tts()
         normalizer = get_normalizer(tts)
@@ -312,6 +326,7 @@ def build_demo(
     with gr.Blocks(title="IndexTTS Demo") as demo:
         mutex = threading.Lock()
 
+        @managed_call(lambda: tts_manager_getter())
         def gen_single(
             emo_control_method,
             prompt,
@@ -690,6 +705,7 @@ def build_demo(
         def on_example_click(example):
             return tuple(gr.update(value=example[idx]) for idx in range(14))
 
+        @managed_call(lambda: tts_manager_getter())
         def on_input_text_change(text, language, max_text_tokens_per_segment):
             tts = get_tts()
             if text and len(text) > 0:
@@ -716,6 +732,7 @@ def build_demo(
             )
             return {segments_preview: gr.update(value=df)}
 
+        @managed_call(lambda: tts_manager_getter())
         def on_add_glossary_term(term, reading_zh, reading_en):
             tts = get_tts()
             normalizer = get_normalizer(tts)
@@ -796,6 +813,7 @@ def build_demo(
                 )
             )
 
+        @managed_call(lambda: tts_manager_getter())
         def on_glossary_checkbox_change(is_enabled):
             tts = get_tts()
             normalizer = get_normalizer(tts)
@@ -804,6 +822,7 @@ def build_demo(
             normalizer.enable_glossary = is_enabled
             return gr.update(visible=is_enabled)
 
+        @managed_call(lambda: tts_manager_getter())
         def on_demo_load():
             tts = get_tts()
             normalizer = get_normalizer(tts)

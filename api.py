@@ -10,6 +10,14 @@ import sys
 import tempfile
 import warnings
 
+from hub_adapter import (
+    add_managed_middleware,
+    create_managed_model,
+    managed_api_call,
+    managed_cuda_device,
+    managed_enabled,
+)
+
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -217,7 +225,7 @@ def create_tts_manager(args: argparse.Namespace) -> SmartModel:
             cfg_path=os.path.join(args.model_dir, "config.yaml"),
             model_dir=args.model_dir,
             use_bf16=bool(args.bf16),
-            device=args.device,
+            device=managed_cuda_device(args.device) if managed_enabled() else args.device,
             use_cuda_kernel=bool(args.use_cuda_kernel),
             use_deepspeed=bool(args.use_deepspeed),
             use_accel=bool(args.use_accel),
@@ -225,6 +233,8 @@ def create_tts_manager(args: argparse.Namespace) -> SmartModel:
             use_qwen_emo=True,
         )
 
+    if managed_enabled():
+        return create_managed_model(loader)
     return SmartModel(loader, timeout_seconds=7200)
 
 
@@ -249,7 +259,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
 
         try:
             tts_manager = create_tts_manager(args)
-            if args.preload_model:
+            if args.preload_model and not managed_enabled():
                 logger.info(
                     "启动阶段预热 IndexTTS2 模型，等待权重、缓存和 CUDA 扩展全部就绪..."
                 )
@@ -275,6 +285,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
     )
     app.state.cmd_args = args
     app.state.tts_manager = None
+    add_managed_middleware(app)
 
     setup_cuda_health(
         app,
@@ -292,6 +303,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
     )
 
     @app.post("/generate")
+    @managed_api_call(lambda: app.state.tts_manager)
     async def generate_audio(
         text: str = Form(...),
         language: str = Form("ZH"),

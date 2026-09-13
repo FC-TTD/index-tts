@@ -1,0 +1,18 @@
+# syntax=docker/dockerfile:1
+# Both inputs must be immutable registry references ending in @sha256:<digest>.
+ARG BASE_IMAGE
+ARG HUB_IMAGE
+FROM ${HUB_IMAGE} AS hub_sdk
+FROM ${BASE_IMAGE}
+ARG BASE_IMAGE
+ARG HUB_IMAGE
+RUN python -c 'import re,sys; assert all(re.fullmatch(r".+@sha256:[a-f0-9]{64}", x) for x in sys.argv[1:]), "BASE_IMAGE and HUB_IMAGE must use immutable sha256 digests"' "${BASE_IMAGE}" "${HUB_IMAGE}"
+COPY --from=hub_sdk /opt/hub-runtime-sdk /opt/hub-runtime-sdk
+COPY api.py webui.py hub_adapter.py /app/
+COPY indextts/infer_v2_5.py /app/indextts/infer_v2_5.py
+ENV PYTHONPATH=/opt/hub-runtime-sdk:/app \
+    TTD_WEBHOOK_URL=""
+
+ARG SOURCE_REV
+LABEL org.opencontainers.image.source="https://github.com/FC-TTD/index-tts" \
+      org.opencontainers.image.revision="${SOURCE_REV}"
