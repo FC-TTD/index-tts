@@ -1,13 +1,11 @@
 import ast
 from io import BytesIO
-import json
 import os
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
 from uuid import uuid4
-import wave
 
 import importlib.util
 import pytest
@@ -209,7 +207,7 @@ if __name__ == "__main__":
 class OriginalUI(unittest.TestCase):
     def test_original_gradio_generation_callback_uses_shared_runtime(self):
         from hub_runtime.ui import build_demo
-        from hub_runtime.cli import build_parser
+        from hub_runtime.startup import build_parser
         from unittest.mock import patch
 
         with tempfile.TemporaryDirectory() as directory:

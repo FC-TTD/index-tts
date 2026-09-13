@@ -3,6 +3,7 @@
 This entry uses the shared `ttd-model-runtime` SDK for lifecycle, private control, activity tracking, passive health and audio tools. Upstream `api.py`, `entry.py`, `webui.py` and `indextts/` are unchanged on this branch.
 
 - `__main__.py`: assembles API and the copied Gradio UI with one Runtime.
+- `startup.py`: shared container startup arguments, cache paths and weight-file validation; no separate CLI client or model lifecycle manager.
 - `adapter.py`: native model constructor, model-local inference lock, completion/cache hooks and UI input mapping. The official device map and precision choices are retained.
 - `service.py`: shared existing API inference/postprocessing pipeline. Both API and UI call it.
 - `api.py`: existing multipart API contract registered on the foundation.
@@ -13,6 +14,8 @@ This entry uses the shared `ttd-model-runtime` SDK for lifecycle, private contro
 python -m hub_runtime --model_dir /app/checkpoints --host 0.0.0.0 --port 8000 --bf16 --device cuda:0
 python -m hub_runtime describe
 ```
+
+The unused legacy `--preload_model` / `--no-preload_model` options are removed. Residency and loading are controlled by Hub and Runtime; there is no second SmartModel timer or preload path. The copied UI uses the same startup configuration and weight validation as the API.
 
 `describe` emits the model OpenAPI contract without loading weights, requiring Hub credentials or contacting a node. It is a build-time input for later Gateway declaration generation, not a second manually maintained configuration.
 
