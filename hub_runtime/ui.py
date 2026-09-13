@@ -804,5 +804,3 @@ def build_demo(args: argparse.Namespace, runtime) -> gr.Blocks:
 
     demo.queue(20)
     return demo
-
-
