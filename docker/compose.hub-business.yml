@@ -35,7 +35,7 @@ services:
       caddy_2.reverse_proxy.header_up: Host xique-tts.api.ttd.honeywave.net
       caddy_2.reverse_proxy.header_up_1: X-Forwarded-Host xique-tts.api.ttd.honeywave.net
       caddy_2.reverse_proxy.header_up_2: X-Forwarded-Proto https
-      caddy_2.reverse_proxy.header_up_3: X-Forwarded-Port '443'
+      caddy_2.reverse_proxy.header_up_3: X-Forwarded-Port 443
       caddy_2.reverse_proxy.health_uri: /hub-entry/health
       caddy_2.reverse_proxy.health_interval: 10s
       caddy_2.reverse_proxy.health_timeout: 2s
