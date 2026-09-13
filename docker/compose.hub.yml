@@ -12,7 +12,8 @@ services:
       HUB_RUNTIME_VERSION: ${INDEX_RUNTIME_VERSION:?}
       HUB_NODE_URL: http://host.docker.internal:13912
       HUB_RUNTIME_TOKEN: ${HUB_INDEX_RUNTIME_TOKEN:?}
-      HUB_RUNTIME_STATE_DIR: /var/lib/hub-runtime
+      HUB_RUNTIME_ACTOR_ID: ${HUB_RUNTIME_ACTOR_ID:?unique runtime actor required}
+      HUB_RUNTIME_STATE_DIR: /var/lib/hub-runtime/actors/${HUB_RUNTIME_ACTOR_ID:?}
       HUB_GLOSSARY_PATH: /var/lib/hub-runtime/glossary.yaml
       HUB_CONTROL_HOST: '0.0.0.0'
       HUB_CONTROL_PORT: '18083'
@@ -28,8 +29,8 @@ services:
       - ${TTD_DATA}/index-tts/checkpoints-v25:/app/checkpoints:ro
       - ${TTD_DATA}/index-tts/hf-cache:/opt/hf_cache
       - ${TTD_DATA}/index-tts/hf-cache:/app/checkpoints/hf_cache
-      - ${TTD_DATA}/index-tts/torch-extensions/hub-edge:/opt/torch_extensions
-      - ${TTD_DATA}/index-tts/torchinductor/hub-edge:/opt/torchinductor
+      - ${TTD_DATA}/index-tts/torch-extensions/hub-${HUB_NODE_ID:?host node required}:/opt/torch_extensions
+      - ${TTD_DATA}/index-tts/torchinductor/hub-${HUB_NODE_ID:?host node required}:/opt/torchinductor
       - ${TTD_DATA}/hub-v2/outputs/index:/app/outputs
       - ${HUB_ROOT}/runtime-state/index:/var/lib/hub-runtime
     deploy:
