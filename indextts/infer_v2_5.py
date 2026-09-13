@@ -1,6 +1,5 @@
 import os
 from subprocess import CalledProcessError
-from hub_adapter import serialize_managed_inference
 
 os.environ['HF_HUB_CACHE'] = './checkpoints/hf_cache'
 import json
@@ -503,7 +502,6 @@ class IndexTTS2:
         return emo_vector
 
     # 原始推理模式
-    @serialize_managed_inference
     def infer(self, spk_audio_prompt, text, output_path, lang,
               emo_audio_prompt=None, emo_alpha=1.0,
               emo_vector=None, use_emo_text=False, emo_text=None, use_random=False, interval_silence=200,

@@ -93,6 +93,8 @@ def create_managed_model(loader):
 
     def checked_loader():
         model = loader()
+        # Wrap this instance at the integration boundary; leave upstream source intact.
+        model.infer = serialize_managed_inference(model.infer)
         observe_model_devices(model)
         if os.getenv("HUB_GLOSSARY_PATH"):
             model.glossary_path = os.environ["HUB_GLOSSARY_PATH"]

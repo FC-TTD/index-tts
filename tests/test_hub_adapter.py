@@ -75,7 +75,7 @@ class HubAdapterTests(unittest.TestCase):
         sdk = SimpleNamespace(ManagedModel=FakeManaged, managed_call=fake_managed_call)
         calls = []
         with patch.dict(os.environ, {"HUB_RUNTIME_ENABLED": "1"}), patch.dict(sys.modules, {"ttd_hub_runtime": sdk}), patch.object(hub_adapter, "observe_model_devices", lambda model: None):
-            manager = hub_adapter.create_managed_model(lambda: calls.append("load") or object())
+            manager = hub_adapter.create_managed_model(lambda: calls.append("load") or SimpleNamespace(infer=lambda: "native inference"))
             self.assertEqual(calls, [])
             self.assertIs(manager.cleanup, hub_adapter.cleanup_cuda)
             self.assertIs(manager.synchronize, hub_adapter.synchronize_cuda)
@@ -89,6 +89,7 @@ class HubAdapterTests(unittest.TestCase):
             @hub_adapter.managed_call(lambda: manager)
             def outer():
                 self.assertIs(inner(), manager.get())
+                self.assertEqual(manager.get().infer(), "native inference")
                 raise ValueError("inference failed")
 
             with self.assertRaisesRegex(ValueError, "inference failed"):
@@ -142,8 +143,7 @@ class HubAdapterTests(unittest.TestCase):
         cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "QwenEmotion")
         cls.body = [next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "__init__")]
         calls = []
-        ns = dict(managed_enabled=hub_adapter.managed_enabled, managed_cuda_device=lambda: "cuda:0",
-                  AutoTokenizer=SimpleNamespace(from_pretrained=lambda path: object()),
+        ns = dict(AutoTokenizer=SimpleNamespace(from_pretrained=lambda path: object()),
                   AutoModelForCausalLM=SimpleNamespace(from_pretrained=lambda path, **kw: calls.append(kw)))
         exec(compile(ast.Module(body=[cls], type_ignores=[]), "qwen_loader", "exec"), ns)
         for enabled, expected in (("0", "auto"), ("1", "auto")):
@@ -279,7 +279,7 @@ class HubAdapterTests(unittest.TestCase):
             self.assertEqual(model.gpt.buffer.device, "cpu")
             self.assertEqual(model.qwen_emo.model.weight.device, "meta")
 
-    def test_legacy_device_validator_does_not_inspect_model(self):
+    def test_unmanaged_observer_does_not_inspect_model(self):
         with patch.dict(os.environ, {"HUB_RUNTIME_ENABLED": "0"}):
             hub_adapter.observe_model_devices(object())
 
