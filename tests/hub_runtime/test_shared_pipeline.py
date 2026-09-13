@@ -66,6 +66,38 @@ class Model:
 
 
 class SharedPipeline(unittest.TestCase):
+    def test_device_observation_preserves_native_mixed_placement(self):
+        from hub_runtime.device_observation import observe_devices
+
+        class Component:
+            hf_device_map = {"first": 0, "second": "cpu"}
+
+            def parameters(self):
+                return iter(
+                    [
+                        SimpleNamespace(device="cuda:0", dtype="torch.bfloat16"),
+                        SimpleNamespace(device="cpu", dtype="torch.float32"),
+                    ]
+                )
+
+            def buffers(self):
+                return iter([])
+
+            def to(self, *args, **kwargs):
+                raise AssertionError("observation must not change placement")
+
+        model = SimpleNamespace(
+            device="cuda:0",
+            gpt=Component(),
+            qwen_emo=SimpleNamespace(model=Component()),
+        )
+        summary = observe_devices(model)
+        self.assertEqual(summary["components"]["gpt"]["devices"], ["cpu", "cuda:0"])
+        self.assertEqual(
+            summary["components"]["qwen_emo"]["device_map"],
+            {"first": "0", "second": "cpu"},
+        )
+
     def test_api_and_ui_share_effective_parameters_and_processed_audio(self):
         with tempfile.TemporaryDirectory() as directory:
             model = Model()

@@ -12,6 +12,7 @@ from fastapi import UploadFile
 from download_filename import build_download_filename
 from .parameters import DEFAULTS
 from .startup import _ensure_runtime_cache_env
+from .device_observation import observe_devices
 
 _progress = ContextVar("index_gradio_progress", default=None)
 
@@ -31,6 +32,7 @@ def load_model(args):
         use_torch_compile=bool(args.use_torch_compile),
         use_qwen_emo=True,
     )
+    model.__hub_device_summary__ = observe_devices(model)
     glossary = os.getenv("HUB_GLOSSARY_PATH")
     if glossary:
         model.glossary_path = glossary
