@@ -14,7 +14,6 @@ from hub_adapter import (
     add_managed_middleware,
     create_managed_model,
     managed_api_call,
-    managed_cuda_device,
     managed_enabled,
 )
 
@@ -225,7 +224,7 @@ def create_tts_manager(args: argparse.Namespace) -> SmartModel:
             cfg_path=os.path.join(args.model_dir, "config.yaml"),
             model_dir=args.model_dir,
             use_bf16=bool(args.bf16),
-            device=managed_cuda_device(args.device) if managed_enabled() else args.device,
+            device=args.device,
             use_cuda_kernel=bool(args.use_cuda_kernel),
             use_deepspeed=bool(args.use_deepspeed),
             use_accel=bool(args.use_accel),

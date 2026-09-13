@@ -74,7 +74,7 @@ class HubAdapterTests(unittest.TestCase):
     def test_managed_factory_is_lazy_and_nested_callbacks_share_admission(self):
         sdk = SimpleNamespace(ManagedModel=FakeManaged, managed_call=fake_managed_call)
         calls = []
-        with patch.dict(os.environ, {"HUB_RUNTIME_ENABLED": "1"}), patch.dict(sys.modules, {"ttd_hub_runtime": sdk}), patch.object(hub_adapter, "validate_managed_devices", lambda model: None):
+        with patch.dict(os.environ, {"HUB_RUNTIME_ENABLED": "1"}), patch.dict(sys.modules, {"ttd_hub_runtime": sdk}), patch.object(hub_adapter, "observe_model_devices", lambda model: None):
             manager = hub_adapter.create_managed_model(lambda: calls.append("load") or object())
             self.assertEqual(calls, [])
             self.assertIs(manager.cleanup, hub_adapter.cleanup_cuda)
@@ -113,26 +113,21 @@ class HubAdapterTests(unittest.TestCase):
             native.loader()
             self.assertIsNone(calls[-1]["device"])
         ns["create_managed_model"] = lambda loader: FakeManaged(loader, lambda: None)
-        ns["managed_cuda_device"] = lambda requested: "cuda:0"
         with patch.dict(os.environ, {"HUB_RUNTIME_ENABLED": "1"}):
             managed = ns["create_tts_manager"](args)
             self.assertIsInstance(managed, FakeManaged)
             self.assertEqual(len(calls), 1)
             with managed.execution():
                 managed.get()
-            self.assertEqual(calls[-1]["device"], "cuda:0")
+            self.assertIsNone(calls[-1]["device"])
             self.assertIs(calls[-1]["use_bf16"], True)
             self.assertIs(calls[-1]["use_qwen_emo"], True)
 
-    def test_managed_cuda_rejects_cpu_and_multi_gpu_visibility(self):
-        cuda = SimpleNamespace(is_available=lambda: True, device_count=lambda: 1)
-        with patch.dict(sys.modules, {"torch": SimpleNamespace(cuda=cuda)}):
-            self.assertEqual(hub_adapter.managed_cuda_device(), "cuda:0")
-            with self.assertRaises(ValueError):
-                hub_adapter.managed_cuda_device("cpu")
-            cuda.device_count = lambda: 2
-            with self.assertRaises(RuntimeError):
-                hub_adapter.managed_cuda_device()
+    def test_observation_accepts_absent_optional_components(self):
+        with patch.dict(os.environ, {"HUB_RUNTIME_ENABLED": "1"}):
+            model = SimpleNamespace()
+            hub_adapter.observe_model_devices(model)
+            self.assertEqual(model.__hub_device_summary__, {"components": {}})
 
     def test_cleanup_only_reclaims_and_never_moves_weights(self):
         calls = []
@@ -142,7 +137,7 @@ class HubAdapterTests(unittest.TestCase):
             hub_adapter.cleanup_cuda()
         self.assertEqual(calls, ["gc", "sync", "empty", "ipc"])
 
-    def test_qwen_loader_pins_managed_weights_without_changing_precision(self):
+    def test_qwen_loader_preserves_official_auto_placement_and_precision(self):
         tree = ast.parse((ROOT / "indextts/infer_v2_5.py").read_text())
         cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "QwenEmotion")
         cls.body = [next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "__init__")]
@@ -151,7 +146,7 @@ class HubAdapterTests(unittest.TestCase):
                   AutoTokenizer=SimpleNamespace(from_pretrained=lambda path: object()),
                   AutoModelForCausalLM=SimpleNamespace(from_pretrained=lambda path, **kw: calls.append(kw)))
         exec(compile(ast.Module(body=[cls], type_ignores=[]), "qwen_loader", "exec"), ns)
-        for enabled, expected in (("0", "auto"), ("1", {"": "cuda:0"})):
+        for enabled, expected in (("0", "auto"), ("1", "auto")):
             with patch.dict(os.environ, {"HUB_RUNTIME_ENABLED": enabled}):
                 ns["QwenEmotion"]("fixture")
                 self.assertEqual(calls[-1], {"torch_dtype": "float16", "device_map": expected})
@@ -238,7 +233,7 @@ class HubAdapterTests(unittest.TestCase):
             hub_adapter.synchronize_cuda()
         self.assertEqual(calls[-1], "synchronized")
 
-    def test_device_summary_checks_gpu_modules_without_touching_cpu_helpers(self):
+    def test_device_summary_observes_mixed_native_placement_without_mutation(self):
         import json
 
         tensor = lambda device="cuda:0", dtype="torch.float32": SimpleNamespace(device=device, dtype=dtype)
@@ -269,32 +264,24 @@ class HubAdapterTests(unittest.TestCase):
             model.text_process = object()
             return model
 
-        with patch.dict(os.environ, {"HUB_RUNTIME_ENABLED": "1"}), patch.object(hub_adapter, "managed_cuda_device", lambda: "cuda:0"):
+        with patch.dict(os.environ, {"HUB_RUNTIME_ENABLED": "1"}):
             model = model_fixture()
-            hub_adapter.validate_managed_devices(model)
-            summary = json.loads(json.dumps(model.__hub_device_summary__))
-            self.assertEqual(summary["expected_device"], "cuda:0")
-            self.assertEqual(len(summary["components"]), 11)
-            self.assertEqual(summary["components"]["gpt"]["dtypes"], ["torch.bfloat16", "torch.float32"])
-            for bad_device in ("cpu", "meta", "cuda:1"):
-                model = model_fixture()
-                model.gpt.buffer.device = bad_device
-                with self.assertRaisesRegex(RuntimeError, "gpt.buffer"):
-                    hub_adapter.validate_managed_devices(model)
-                self.assertEqual(model.gpt.buffer.device, bad_device)
-                self.assertFalse(hasattr(model, "__hub_device_summary__"))
-            model = model_fixture()
-            model.qwen_emo.model.hf_device_map = {"layer": "disk"}
-            with self.assertRaisesRegex(RuntimeError, "forbidden weight placement"):
-                hub_adapter.validate_managed_devices(model)
-            model = model_fixture()
+            model.gpt.buffer.device = "cpu"
             model.semantic_mean.device = "cpu"
-            with self.assertRaisesRegex(RuntimeError, "semantic_mean"):
-                hub_adapter.validate_managed_devices(model)
+            model.qwen_emo.model.weight.device = "meta"
+            model.qwen_emo.model.hf_device_map = {"layer0": "cpu", "layer1": "cuda:0", "layer2": "disk"}
+            hub_adapter.observe_model_devices(model)
+            summary = json.loads(json.dumps(model.__hub_device_summary__))
+            self.assertEqual(len(summary["components"]), 11)
+            self.assertEqual(summary["components"]["gpt"]["devices"], ["cpu", "cuda:0"])
+            self.assertEqual(summary["components"]["semantic_mean"]["devices"], ["cpu"])
+            self.assertEqual(summary["components"]["qwen_emo.model"]["device_map"], model.qwen_emo.model.hf_device_map)
+            self.assertEqual(model.gpt.buffer.device, "cpu")
+            self.assertEqual(model.qwen_emo.model.weight.device, "meta")
 
     def test_legacy_device_validator_does_not_inspect_model(self):
         with patch.dict(os.environ, {"HUB_RUNTIME_ENABLED": "0"}):
-            hub_adapter.validate_managed_devices(object())
+            hub_adapter.observe_model_devices(object())
 
 
 if __name__ == "__main__":

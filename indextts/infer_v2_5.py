@@ -1,6 +1,6 @@
 import os
 from subprocess import CalledProcessError
-from hub_adapter import managed_cuda_device, managed_enabled, serialize_managed_inference
+from hub_adapter import serialize_managed_inference
 
 os.environ['HF_HUB_CACHE'] = './checkpoints/hf_cache'
 import json
@@ -915,7 +915,7 @@ class QwenEmotion:
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_dir,
             torch_dtype="float16",  # "auto"
-            device_map={"": managed_cuda_device()} if managed_enabled() else "auto"
+            device_map="auto"
         )
         self.prompt = "文本情感分类"
         self.cn_key_to_en = {

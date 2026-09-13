@@ -10,7 +10,6 @@ import warnings
 from hub_adapter import (
     create_managed_model,
     managed_call,
-    managed_cuda_device,
     managed_enabled,
 )
 
@@ -234,7 +233,6 @@ def build_demo(
                 use_deepspeed=deepspeed,
                 use_cuda_kernel=cuda_kernel,
                 use_qwen_emo=True,
-                **({"device": managed_cuda_device()} if managed_enabled() else {}),
             )
 
         tts_manager = (

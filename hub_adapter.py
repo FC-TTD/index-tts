@@ -69,16 +69,6 @@ def add_managed_middleware(app):
         app.add_middleware(HubContextMiddleware)
 
 
-def managed_cuda_device(requested=None):
-    import torch
-
-    if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
-        raise RuntimeError("Hub-managed Index requires exactly one visible CUDA GPU")
-    if requested not in (None, "cuda", "cuda:0"):
-        raise ValueError("Hub-managed Index must use its single visible CUDA GPU")
-    return "cuda:0"
-
-
 def cleanup_cuda():
     """Called only after the SDK drops its last model reference and drains work."""
     import torch
@@ -103,7 +93,7 @@ def create_managed_model(loader):
 
     def checked_loader():
         model = loader()
-        validate_managed_devices(model)
+        observe_model_devices(model)
         if os.getenv("HUB_GLOSSARY_PATH"):
             model.glossary_path = os.environ["HUB_GLOSSARY_PATH"]
         return model
@@ -111,44 +101,45 @@ def create_managed_model(loader):
     return ManagedModel.from_env(checked_loader, cleanup=cleanup_cuda, synchronize=synchronize_cuda)
 
 
-def validate_managed_devices(model):
-    """Observe only Index's explicitly GPU-resident components; never relocate them."""
+def observe_model_devices(model):
+    """Record native placement without changing or rejecting CPU/GPU/offload choices."""
     if not managed_enabled():
         return
-    expected = managed_cuda_device()
-    summary = {"expected_device": expected, "components": {}}
+    summary = {"components": {}}
 
     def record(name, tensors, placement=None):
         devices, dtypes = set(), set()
         count = 0
-        for tensor_name, tensor in tensors:
-            device = str(tensor.device)
-            if device != expected:
-                raise RuntimeError(f"Hub-managed Index {name}.{tensor_name} is on {device}; expected {expected}")
-            devices.add(device)
+        for _, tensor in tensors:
+            devices.add(str(tensor.device))
             dtypes.add(str(tensor.dtype))
             count += 1
-        if count == 0:
-            raise RuntimeError(f"Hub-managed Index {name} has no inspectable GPU tensors")
-        for device in (placement or {}).values():
-            if device != 0 and str(device) not in ("cuda", expected):
-                raise RuntimeError(f"Hub-managed Index {name} has forbidden weight placement {device}")
-        summary["components"][name] = {"devices": sorted(devices), "dtypes": sorted(dtypes), "tensor_count": count}
+        result = {"devices": sorted(devices), "dtypes": sorted(dtypes), "tensor_count": count}
+        if placement is not None:
+            result["device_map"] = {str(k): str(v) for k, v in placement.items()}
+        summary["components"][name] = result
 
-    # These modules are explicitly moved to self.device by IndexTTS2.__init__.
-    for name in ("gpt", "semantic_model", "semantic_codec", "s2mel", "campplus_model", "bigvgan"):
-        component = getattr(model, name)
-        tensors = list(component.named_parameters()) + list(component.named_buffers())
-        record(name, tensors, getattr(component, "hf_device_map", None))
-    emotion = getattr(model, "qwen_emo", None)
-    if emotion is not None:
-        component = emotion.model
-        record("qwen_emo.model", list(component.named_parameters()) + list(component.named_buffers()),
-               getattr(component, "hf_device_map", None))
+    # Observability is best-effort; native model placement remains authoritative.
+    for name in ("gpt", "semantic_model", "semantic_codec", "s2mel", "campplus_model", "bigvgan", "qwen_emo.model"):
+        component = model
+        for part in name.split("."):
+            component = getattr(component, part, None)
+        if component is None:
+            continue
+        try:
+            record(name, list(component.named_parameters()) + list(component.named_buffers()),
+                   getattr(component, "hf_device_map", None))
+        except Exception:
+            summary["components"][name] = {"observation": "unavailable"}
     for name in ("semantic_mean", "semantic_std", "emo_matrix", "spk_matrix"):
-        value = getattr(model, name)
+        value = getattr(model, name, None)
+        if value is None:
+            continue
         tensors = value if isinstance(value, (list, tuple)) else (value,)
-        record(name, ((str(index), tensor) for index, tensor in enumerate(tensors)))
+        try:
+            record(name, ((str(index), tensor) for index, tensor in enumerate(tensors)))
+        except Exception:
+            summary["components"][name] = {"observation": "unavailable"}
     model.__hub_device_summary__ = summary
 
 
