@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1
+ARG BASE_IMAGE
+ARG HUB_IMAGE
+FROM ${HUB_IMAGE} AS runtime_package
+FROM ${BASE_IMAGE}
+ARG BASE_IMAGE
+ARG HUB_IMAGE
+RUN python -c 'import re,sys; assert all(re.fullmatch(r".+@sha256:[a-f0-9]{64}", x) for x in sys.argv[1:])' "${BASE_IMAGE}" "${HUB_IMAGE}"
+COPY --from=runtime_package /opt/hub-runtime-wheel /tmp/hub-runtime-wheel
+# Keep the model image's native framework and media dependency versions.
+RUN uv pip install --python /opt/venv/bin/python --no-deps --no-cache /tmp/hub-runtime-wheel/*.whl
+COPY hub_runtime /app/hub_runtime
+ENV TTD_WEBHOOK_URL="" GRADIO_ANALYTICS_ENABLED="False"
+ARG SOURCE_REV
+ENV BUILDINFO_PATH=/app/hub_runtime/buildinfo.json
+RUN python -c 'import json,sys,importlib.metadata as m; json.dump({"build_commit":sys.argv[1],"hub_image":sys.argv[2],"base_image":sys.argv[3],"runtime_version":m.version("ttd-model-runtime")},open("/app/hub_runtime/buildinfo.json","w"))' "${SOURCE_REV}" "${HUB_IMAGE}" "${BASE_IMAGE}"
+LABEL org.opencontainers.image.source="https://github.com/FC-TTD/index-tts" \
+      org.opencontainers.image.revision="${SOURCE_REV}"
+
+RUN python -m hub_runtime describe > /app/hub_runtime/contract.json

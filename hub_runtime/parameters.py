@@ -1,0 +1,27 @@
+"""Existing API tuning is the shared API/UI default baseline."""
+
+DEFAULTS = {
+    "language": "ZH",
+    "emo_audio_prompt": None,
+    "emo_alpha": 1.0,
+    "emo_vector": None,
+    "use_emo_text": False,
+    "emo_text": None,
+    "use_random": False,
+    "interval_silence": 200,
+    "max_text_tokens_per_sentence": 120,
+    "do_sample": True,
+    "top_p": 0.8,
+    "top_k": 30,
+    "temperature": 0.8,
+    "length_penalty": 0.0,
+    "num_beams": 3,
+    "repetition_penalty": 10.0,
+    "max_mel_tokens": 1500,
+    "remove_silence": True,
+    "postprocess": True,
+    "lufs": -23.0,
+    "expected_duration": None,
+    "speed": 1.0,
+    "pitch": 0.0,
+}
