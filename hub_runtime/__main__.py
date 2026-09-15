@@ -1,6 +1,7 @@
 """Model-owned API/UI assembled by the shared Runtime HTTP foundation."""
 
 import os
+from functools import partial
 import sys
 import json
 from importlib.metadata import version
@@ -17,7 +18,7 @@ def create_app(args=None):
     args = args or parse_args()
     validate_model_dir(args.model_dir)
     runtime = Runtime(
-        loader=lambda: load_model(args), completion=completion, cleanup=cleanup
+        loader=partial(load_model, args), completion=completion, cleanup=cleanup
     )
     app = build_api(args, runtime)
 

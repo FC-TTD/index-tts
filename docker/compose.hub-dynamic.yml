@@ -1,0 +1,15 @@
+# GPU engine runs in a fresh single-UUID process; HTTP/UI stays on the CPU.
+services:
+  runtime:
+    environment:
+      HUB_GPU_PROCESS: '1'
+      CUDA_VISIBLE_DEVICES: ''
+    labels:
+      ttd.hub.dynamic_gpu: 'true'
+    deploy:
+      resources:
+        reservations:
+          devices: !override
+            - driver: nvidia
+              device_ids: ['${GPU_0:?}', '${GPU_1:?}', '${GPU_2:?}']
+              capabilities: [gpu]

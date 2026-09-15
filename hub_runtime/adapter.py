@@ -13,6 +13,7 @@ from download_filename import build_download_filename
 from .parameters import DEFAULTS
 from .startup import _ensure_runtime_cache_env
 from .device_observation import observe_devices
+from ttd_model_runtime.engine import engine_progress, progress_scope
 
 _progress = ContextVar("index_gradio_progress", default=None)
 
@@ -43,7 +44,7 @@ def load_model(args):
     def infer(*positional, **keywords):
         with lock:
             previous = getattr(model, "gr_progress", None)
-            model.gr_progress = _progress.get()
+            model.gr_progress = _progress.get() or engine_progress()
             try:
                 return native_infer(*positional, **keywords)
             finally:
@@ -129,7 +130,8 @@ def generate_ui(
         )
         token = _progress.set(progress)
         try:
-            response = synthesize(runtime, args, **values)
+            with progress_scope(progress):
+                response = synthesize(runtime, args, **values)
         finally:
             _progress.reset(token)
     output = Path("outputs") / build_download_filename(source_name, text)
