@@ -42,3 +42,6 @@ The deployed SDK now rejects a released cached grant before interpreting its his
 
 
 The concurrent SDK no longer supplies an implicit model-wide RPC lock. Index explicitly shares its existing infer lock with `__hub_rpc_lock__` so glossary access/mutation cannot race native inference. This adapter retains serial native inference until its condition and GPT mel caches become request-local; it does not claim throughput gains from transport multiplexing alone.
+
+
+2026-09-16 concurrency acceptance: shared SDK multiplexing is deployed. Original UI and Gateway passed on the multiplexed SDK; native cache/glossary remain explicitly serialized until request-local cache isolation. Budget remains9GiB. Healthy residency is retained after completion, without an idle TTL. Full evidence is in Hub `docs/proposals/model-compute-pool/runtime-concurrency-2026-09-16.md`.
