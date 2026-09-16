@@ -39,6 +39,9 @@ def load_model(args):
         model.glossary_path = glossary
     native_infer = model.infer
     lock = threading.RLock()
+    # Index caches and glossary mutations share native mutable state. Explicit
+    # model ownership replaces the former accidental global SDK serialization.
+    model.__hub_rpc_lock__ = lock
 
     @wraps(native_infer)
     def infer(*positional, **keywords):

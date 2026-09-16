@@ -39,3 +39,6 @@ Expanded tests use the real `create_app` entry and native Gradio under both the 
 `device_observation.py` records native tensor devices/dtypes and device maps for smoke evidence. It does not move tensors, change precision or reject official CPU/GPU mixed placement. The latest acceptance plan finishes Index on worker first, then expands to the second host; Compose uses `HUB_NODE_ID` for host-specific compilation caches. The actor integration is deployed; the current formal instance uses a fresh actor and credential while preserving service generations.
 
 The deployed SDK now rejects a released cached grant before interpreting its historical drain intent. The first stale request fails explicitly; Gateway invalidates that cache and later independent requests can acquire a new lease. This was verified through production Gateway, including maintenance rejection, subsequent recovery and persisted internal usage records.
+
+
+The concurrent SDK no longer supplies an implicit model-wide RPC lock. Index explicitly shares its existing infer lock with `__hub_rpc_lock__` so glossary access/mutation cannot race native inference. This adapter retains serial native inference until its condition and GPT mel caches become request-local; it does not claim throughput gains from transport multiplexing alone.
