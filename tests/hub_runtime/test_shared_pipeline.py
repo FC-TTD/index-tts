@@ -383,3 +383,26 @@ class OriginalUI(unittest.TestCase):
                     self.assertTrue(list((Path(directory) / "outputs").glob("*.wav")))
             finally:
                 os.chdir(old)
+
+
+def test_model_reload_reads_shared_glossary_without_opening_ui(tmp_path, monkeypatch):
+    import sys
+    from types import ModuleType
+    from hub_runtime import adapter
+    glossary=tmp_path/"glossary.yaml"
+    glossary.write_text("custom-pronunciation",encoding="utf-8")
+    class Native:
+        def __init__(self, **kwargs):
+            self.words="checkpoint-default"
+            self.text_process=SimpleNamespace(load_glossary_from_yaml=self.load)
+        def load(self,path):self.words=Path(path).read_text()
+        def infer(self):return self.words
+    native=ModuleType("indextts.infer_v2_5");native.IndexTTS2=Native
+    monkeypatch.setitem(sys.modules,"indextts.infer_v2_5",native)
+    monkeypatch.setattr(adapter,"observe_devices",lambda model:{})
+    monkeypatch.setattr(adapter,"_ensure_runtime_cache_env",lambda:None)
+    monkeypatch.setenv("HUB_GLOSSARY_PATH",str(glossary))
+    args=SimpleNamespace(model_dir="checkpoints",bf16=True,device="cuda:0",use_cuda_kernel=False,use_deepspeed=False,use_accel=False,use_torch_compile=False)
+    assert adapter.load_model(args).infer()=="custom-pronunciation"
+    glossary.write_text("updated-pronunciation",encoding="utf-8")
+    assert adapter.load_model(args).infer()=="updated-pronunciation"

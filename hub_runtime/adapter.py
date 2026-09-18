@@ -37,6 +37,8 @@ def load_model(args):
     glossary = os.getenv("HUB_GLOSSARY_PATH")
     if glossary:
         model.glossary_path = glossary
+        if Path(glossary).is_file():
+            model.text_process.load_glossary_from_yaml(glossary)
     native_infer = model.infer
     lock = threading.RLock()
     # Index caches and glossary mutations share native mutable state. Explicit
