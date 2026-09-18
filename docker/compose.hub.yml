@@ -1,0 +1,64 @@
+# Pre-cutover validation asset. Formal adoption must preserve the existing
+# business domain and API/UI paths; index-hub is not the final naming rule.
+name: index-hub
+services:
+  runtime:
+    image: ${INDEX_IMAGE:?immutable INDEX_IMAGE required}
+    container_name: index-hub-runtime
+    restart: "no"
+    command: [python, -m, hub_runtime, --model_dir, /app/checkpoints, --host, '0.0.0.0', --port, '8000', --bf16, --device, 'cuda:0']
+    environment:
+      HUB_SERVICE_ID: index-hub
+      HUB_RUNTIME_VERSION: ${INDEX_RUNTIME_VERSION:?}
+      HUB_NODE_URL: http://host.docker.internal:13912
+      HUB_RUNTIME_TOKEN: ${HUB_INDEX_RUNTIME_TOKEN:?}
+      HUB_RUNTIME_ACTOR_ID: ${HUB_RUNTIME_ACTOR_ID:?unique runtime actor required}
+      HUB_RUNTIME_STATE_DIR: /var/lib/hub-runtime/actors/${HUB_RUNTIME_ACTOR_ID:?}
+      HUB_GLOSSARY_PATH: /var/lib/hub-runtime/glossary.yaml
+      HUB_CONTROL_HOST: '0.0.0.0'
+      HUB_CONTROL_PORT: '18083'
+      ENABLE_GRADIO_UI: '1'
+      GRADIO_MOUNT_PATH: /__gradio__
+      GRADIO_ALLOWED_HOSTS: index-hub
+      TTD_WEBHOOK_URL: ''
+      TORCH_EXTENSIONS_DIR: /opt/torch_extensions
+      TORCHINDUCTOR_CACHE_DIR: /opt/torchinductor
+    extra_hosts: ['host.docker.internal:host-gateway']
+    ports: ['127.0.0.1:13913:18083']
+    volumes:
+      - ${TTD_DATA}/index-tts/checkpoints-v25:/app/checkpoints:ro
+      - ${TTD_DATA}/index-tts/hf-cache:/opt/hf_cache
+      - ${TTD_DATA}/index-tts/hf-cache:/app/checkpoints/hf_cache
+      - ${TTD_DATA}/index-tts/torch-extensions/hub-${HUB_NODE_ID:?host node required}:/opt/torch_extensions
+      - ${TTD_DATA}/index-tts/torchinductor/hub-${HUB_NODE_ID:?host node required}:/opt/torchinductor
+      - ${TTD_DATA}/hub-v2/outputs/index:/app/outputs
+      - ${HUB_ROOT}/runtime-state/index:/var/lib/hub-runtime
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['${GPU_DEVICE:?host ordinal or UUID required}']
+              capabilities: [gpu]
+    networks: [model]
+    labels:
+      ttd.hub.release: ${RELEASE_ID:?}
+      ttd.hub.instance: index-hub
+    mem_limit: 32g
+    shm_size: 2g
+  entry:
+    image: ${HUB_IMAGE:?immutable HUB_IMAGE required}
+    container_name: index-hub-entry
+    restart: unless-stopped
+    entrypoint: [/usr/local/bin/model-entry]
+    command: [--upstream, 'http://runtime:8000', --listen, ':8080']
+    networks: [model, caddy]
+    labels:
+      ttd.hub.release: ${RELEASE_ID:?}
+      caddy: http://index-hub
+      caddy.reverse_proxy: '{{upstreams 8080}}'
+      caddy_ingress_network: caddy
+    mem_limit: 256m
+networks:
+  model: {}
+  caddy: {external: true}

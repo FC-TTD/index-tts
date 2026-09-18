@@ -1,0 +1,44 @@
+# Prepared cutover overlay, not applied by the current fresh-release installer.
+# Requires the old index-tts_api-3 route owner to relinquish these exact aliases
+# through its managed deployment, after drain and before activating this entry.
+# Compose >= 2.24.4 is required for !override (verified locally on v5.3.1).
+services:
+  runtime:
+    environment:
+      GRADIO_ALLOWED_HOSTS: xique,xique-tts.api.ttd.honeywave.net
+      # Port 8000 is reachable only on the private model network, via entry.
+      FORWARDED_ALLOW_IPS: '*'
+  entry:
+    # Caddy checks the CPU entry, so Runtime outages still reach its preparing response.
+    command: [--upstream, 'http://runtime:8000', --listen, ':8080', --public-origin, 'https://xique-tts.api.ttd.honeywave.net']
+    labels: !override
+      ttd.hub.release: ${RELEASE_ID:?}
+      caddy_ingress_network: caddy
+      caddy_0: http://index-api
+      caddy_0.reverse_proxy: '{{upstreams 8080}}'
+      caddy_0.reverse_proxy.health_uri: /hub-entry/health
+      caddy_0.reverse_proxy.health_interval: 10s
+      caddy_0.reverse_proxy.health_timeout: 2s
+      caddy_0.reverse_proxy.health_fails: '1'
+      caddy_0.reverse_proxy.health_passes: '1'
+      caddy_0.reverse_proxy.health_status: '200'
+      caddy_1: http://xique
+      caddy_1.reverse_proxy: '{{upstreams 8080}}'
+      caddy_1.reverse_proxy.health_uri: /hub-entry/health
+      caddy_1.reverse_proxy.health_interval: 10s
+      caddy_1.reverse_proxy.health_timeout: 2s
+      caddy_1.reverse_proxy.health_fails: '1'
+      caddy_1.reverse_proxy.health_passes: '1'
+      caddy_1.reverse_proxy.health_status: '200'
+      caddy_2: http://xique-tts-public-proxy
+      caddy_2.reverse_proxy: '{{upstreams 8080}}'
+      caddy_2.reverse_proxy.header_up: Host xique-tts.api.ttd.honeywave.net
+      caddy_2.reverse_proxy.header_up_1: X-Forwarded-Host xique-tts.api.ttd.honeywave.net
+      caddy_2.reverse_proxy.header_up_2: X-Forwarded-Proto https
+      caddy_2.reverse_proxy.header_up_3: X-Forwarded-Port 443
+      caddy_2.reverse_proxy.health_uri: /hub-entry/health
+      caddy_2.reverse_proxy.health_interval: 10s
+      caddy_2.reverse_proxy.health_timeout: 2s
+      caddy_2.reverse_proxy.health_fails: '1'
+      caddy_2.reverse_proxy.health_passes: '1'
+      caddy_2.reverse_proxy.health_status: '200'

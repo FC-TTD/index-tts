@@ -1,0 +1,7 @@
+# syntax=docker/dockerfile:1
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+# Preserve native inference/dependencies and the current healthcheck.
+COPY --link hub_runtime/adapter.py /app/hub_runtime/adapter.py
+ARG SOURCE_REV
+LABEL ttd.hub.provider.revision="${SOURCE_REV}"
